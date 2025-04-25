@@ -113,7 +113,7 @@ T1 = 152.48                 #isolator inlet static temp, K
 p1 = 81741.125              #isolator inlet static pressure, Pa
 gas1.TP = T1, p1            #isolator inlet solution/flow initialization
 u1 = M1*gas1.sound_speed
-state1 = gas1, u1
+state1 = gas1, u1           #isolator inlet velocity, m/s
 #POST-SHOCK ISOLATOR CONDITONS
 gas2.TP = T1*1.770, p1*5.375
 u2 = (M1*0.542)*gas2.sound_speed
