@@ -146,7 +146,7 @@ def plot_state(domain, filename):
     geometry = domain.geometry
     T = physics.get_temperature(state)
 
-    fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
+    fig, ax = plt.subplots(5, 1, sharex=True, figsize=(6, 9))
     ax[0].plot(geometry.x * xscale, state.density)
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
@@ -179,39 +179,39 @@ def plot_state(domain, filename):
     if geometry.h is not None:
         add_h_plot(domain, ax[4], scale=xscale)
 
-    if physics.is_flamelet:
-        state = physics.set_state(state)
-        Y_H2 = physics.lookup("H2", state)
-        Y_OH = physics.lookup("OH", state)
-        Y_H2O = physics.lookup("H2O", state)
-    else:
-        Y = state.mass_fractions
-        Y_H2 = Y[:, physics.gas.species_index("H2")]
-        Y_OH = Y[:, physics.gas.species_index("OH")]
-        Y_H2O = Y[:, physics.gas.species_index("H2O")]
-    ax[5].plot(geometry.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
-    ax[5].plot(geometry.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
-    ax[5].plot(geometry.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
-    if Y_H2.max() < 1e-6:
-        ax[5].set_ylim(-1e-3, 1e-3)
-    else:
-        ax[5].set_ymargin(0.1)
-    ax[5].set_ylabel(r"$Y_k$ [-]")
-    ax[5].legend(loc="upper right")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[5], scale=xscale)
+    # if physics.is_flamelet:
+    #     state = physics.set_state(state)
+    #     Y_H2 = physics.lookup("H2", state)
+    #     Y_OH = physics.lookup("OH", state)
+    #     Y_H2O = physics.lookup("H2O", state)
+    # else:
+    #     Y = state.mass_fractions
+    #     Y_H2 = Y[:, physics.gas.species_index("H2")]
+    #     Y_OH = Y[:, physics.gas.species_index("OH")]
+    #     Y_H2O = Y[:, physics.gas.species_index("H2O")]
+    # ax[5].plot(geometry.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
+    # ax[5].plot(geometry.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
+    # ax[5].plot(geometry.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
+    # if Y_H2.max() < 1e-6:
+    #     ax[5].set_ylim(-1e-3, 1e-3)
+    # else:
+    #     ax[5].set_ymargin(0.1)
+    # ax[5].set_ylabel(r"$Y_k$ [-]")
+    # ax[5].legend(loc="upper right")
+    # if geometry.h is not None:
+    #     add_h_plot(domain, ax[5], scale=xscale)
 
-    ax[6].scatter(
-        domain.injector.fluid_tips[:, 0] * xscale,
-        domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
-        s=1,
-    )
-    ax[6].set_ymargin(0.1)
-    ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[6], scale=xscale)
+    # ax[6].scatter(
+    #     domain.injector.fluid_tips[:, 0] * xscale,
+    #     domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
+    #     s=1,
+    # )
+    # ax[6].set_ymargin(0.1)
+    # ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
+    # if geometry.h is not None:
+    #     add_h_plot(domain, ax[6], scale=xscale)
 
-    ax[6].set_xlabel("x [mm]")
+    # ax[6].set_xlabel("x [mm]")
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 

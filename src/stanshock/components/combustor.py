@@ -84,6 +84,7 @@ class Combustor:
 
         # Initialize the geometry of the domain
         self.geometry = Geometry(
+            self.t,
             self.x,
             self.h,
             self.w,
@@ -223,6 +224,8 @@ class Combustor:
                     pLR[NAssign, iX] = self.boundary_conditions[ibc][2]
                 if self.boundary_conditions[ibc][3] is not None:
                     YLR[NAssign, iX, :] = self.boundary_conditions[ibc][3]
+        # print("face states are:")
+        # print(face_states)
         return face_states
 
     def advance_advection(self, dt):
