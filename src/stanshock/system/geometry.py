@@ -149,13 +149,13 @@ class Geometry(RightHandSide):
         r = y[0:n]; ru = y[n:2*n]; E = y[2*n:3*n]
         p = (gamma - 1) * (E - 0.5*ru**2 /r)
         rhs = np.zeros_like(y)
-        if self.dlnAdt is not None:
-            dlnAdt = self.dlnAdt(x,t)
+        if self.dlnA_dt is not None:
+            dlnAdt = self.dlnA_dt(x,time)
             rhs[0:n] -= r*dlnAdt
             rhs[n:2*n] -= ru*dlnAdt
             rhs[2*n:3*n] -= E*dlnAdt
-        if self.dlnAdx is not None:
-            dlnAdx = self.dlnAdx(x,t)
+        if self.dlnA_dx is not None:
+            dlnAdx = self.dlnA_dx(x,time)
             rhs[0:n]-= ru*dlnAdx
             rhs[n:2*n]-= (ru**2.0 / r)*dlnAdx
             rhs[2*n:3*n] -= (ru/r*(E+p))*dlnAdx
