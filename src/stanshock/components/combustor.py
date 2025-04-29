@@ -4,6 +4,7 @@ import cantera as ct
 import numpy as np
 
 from stanshock.models.boundary_layer import BoundaryLayer
+from stanshock.models.pseudoshock import Pseudoshock
 from stanshock.numerics.face_extrapolation import FifthOrderWeno, FirstOrder
 from stanshock.numerics.inviscid_flux import InviscidFlux, hllc_flux
 from stanshock.numerics.viscous_flux import ViscousFlux
@@ -75,6 +76,7 @@ class Combustor:
             lambda _x, _t: True
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
+        self.include_pseudoshock = False #exclude pseudoshock in isolator
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
         # overwrite the default data
@@ -138,6 +140,12 @@ class Combustor:
                 hydraulic_diameter=self.geometry.hydraulic_diameter,
                 characteristic_length=self.geometry.characteristic_length,
                 wall_temperature=self.wall_temperature,
+                skin_friction_coefficient=self.skin_friction_coefficient,
+            )
+        if self.include_pseudoshock:
+            self.pseudoshock = Pseudoshock(
+                hydraulic_diameter=self.geometry.hydraulic_diameter,
+                characteristic_length=self.geometry.characteristic_length,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
 
@@ -488,6 +496,26 @@ class Combustor:
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
+    def advance_pseudoshock(self,dt):
+        """
+        This method advances the pseudoshock solution
+            inputs
+                dt=time step
+        """
+        y = self.physics.primitive_to_conservative(self.state)
+
+        #Get RHS
+        dydt = self.pseudoshock.source(self.t, y, self.physics, self.state.gamma,self.geometry)
+
+        #Single forward-Euler step
+        y += dydt * dt
+
+        #Update
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
+
+
     def advance_source_terms(self, dt):
         """
         This method advances the source terms in the axial direction
@@ -589,6 +617,8 @@ class Combustor:
                 self.advance_quasi_1d(dt)
             if self.include_boundary_layer:
                 self.advance_boundary_layer(dt)
+            if self.include_pseudoshock:
+                self.advance_pseudoshock(dt)
             if self.source_terms is not None:
                 self.advance_source_terms(dt)
             if self.injector is not None:

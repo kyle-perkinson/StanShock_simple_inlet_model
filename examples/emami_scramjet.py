@@ -245,6 +245,7 @@ try:
         d_outer=D_H,
         wall_temperature=330.0,
         include_boundary_layer=True,
+        include_pseudoshock=True,
         initialization=("riemann", state1, state2, xShock),
         boundary_conditions=BCs,
         physics=physics_model,
