@@ -33,10 +33,15 @@ class Geometry(RightHandSide):
         self.dlnA_dx = dlnA_dx
 
         if self.h is not None and self.w is not None:
-            self.hydraulic_diameter = 2 * self.h(self.x, self.time) * self.w / (self.h(self.x,self.time) + self.w)
+            self.hydraulic_diameter = (
+                2
+                * self.h(self.x, self.time)
+                * self.w
+                / (self.h(self.x, self.time) + self.w)
+            )
             self.characteristic_length = self.hydraulic_diameter.copy()
         elif self.d_outer is not None:
-            self.hydraulic_diameter = self.d_outer(self.x,self.time)
+            self.hydraulic_diameter = self.d_outer(self.x, self.time)
             self.characteristic_length = self.hydraulic_diameter.copy()
 
             if self.d_inner is not None:
@@ -74,27 +79,11 @@ class Geometry(RightHandSide):
                 self.integrator.set_initial_value(y0, time)
                 self.integrator.set_f_params(args)
                 self.integrator.integrate(time + dt)
-                rhs[idx_implicit] = (self.integrator.y - state_array[idx_implicit,self.idx_source_terms]) / dt
+                rhs[idx_implicit] = (
+                    self.integrator.y - state_array[idx_implicit, self.idx_source_terms]
+                ) / dt
 
-
-
-
-        # # Integrate fast terms implicitly
-        # rhs = np.zeros(state_array[self.idx_locations, self.idx_source_terms].shape)
-        # for i in idx_implicit:
-        #     # Initialize
-        #     y0 = state_array[i, self.idx_source_terms]
-        #     args = self.x[i], gamma_star[i]
-        #     self.integrator.set_initial_value(y0, time)
-        #     self.integrator.set_f_params(args)
-
-        #     # Solve
-        #     self.integrator.integrate(time + dt)
-
-        #     # Store RHS source term
-        #     rhs[i, :] = (self.integrator.y - state_array[i, self.idx_source_terms]) / dt
-
-        # # Add slow source terms
+        # Add slow source terms
         state = physics.conservative_to_primitive(state_array, gamma_star)
         rhs[idx_explicit, :] = self.source_slow(time, state_array, state, idx_explicit)
 
@@ -121,44 +110,23 @@ class Geometry(RightHandSide):
 
         return rhs
 
-    # def source_fast(self, time: float, y: Array, args: tuple[float, float]):
-    #     """Fast source terms for quasi-1D geometry."""
-    #     # Unpack the input and initialize
-    #     x, gamma = args
-    #     r, ru, E = y
-    #     p = (gamma - 1.0) * (E - 0.5 * ru**2.0 / r)
-    #     rhs = np.zeros(3)
-
-    #     # create quasi-1D right hand side
-    #     if self.dlnA_dt is not None:
-    #         dlnA_dt = self.dlnA_dt([x], time)[0]
-    #         rhs[0] -= r * dlnA_dt
-    #         rhs[1] -= ru * dlnA_dt
-    #         rhs[2] -= E * dlnA_dt
-
-    #     if self.dlnA_dx is not None:
-    #         dlnA_dx = self.dlnA_dx([x], time)[0]
-    #         rhs[0] -= ru * dlnA_dx
-    #         rhs[1] -= (ru**2.0 / r) * dlnA_dx
-    #         rhs[2] -= (ru / r * (E + p)) * dlnA_dx
-
-    #     return rhs
-    def source_fast(self, time: float, y: Array, args: Array):
-        x = args[0]; gamma = args[1]
+    def source_fast(self, time: float, y: Array, args: tuple[Array, Array]):
+        x = args[0]
+        gamma = args[1]
         n = len(x)
-        r = y[0:n]; ru = y[n:2*n]; E = y[2*n:3*n]
-        p = (gamma - 1) * (E - 0.5*ru**2 /r)
+        r = y[0:n]
+        ru = y[n : 2 * n]
+        E = y[2 * n : 3 * n]
+        p = (gamma - 1) * (E - 0.5 * ru**2 / r)
         rhs = np.zeros_like(y)
         if self.dlnA_dt is not None:
-            dlnAdt = self.dlnA_dt(x,time)
-            rhs[0:n] -= r*dlnAdt
-            rhs[n:2*n] -= ru*dlnAdt
-            rhs[2*n:3*n] -= E*dlnAdt
+            dlnAdt = self.dlnA_dt(x, time)
+            rhs[0:n] -= r * dlnAdt
+            rhs[n : 2 * n] -= ru * dlnAdt
+            rhs[2 * n : 3 * n] -= E * dlnAdt
         if self.dlnA_dx is not None:
-            dlnAdx = self.dlnA_dx(x,time)
-            rhs[0:n]-= ru*dlnAdx
-            rhs[n:2*n]-= (ru**2.0 / r)*dlnAdx
-            rhs[2*n:3*n] -= (ru/r*(E+p))*dlnAdx
+            dlnAdx = self.dlnA_dx(x, time)
+            rhs[0:n] -= ru * dlnAdx
+            rhs[n : 2 * n] -= (ru**2.0 / r) * dlnAdx
+            rhs[2 * n : 3 * n] -= (ru / r * (E + p)) * dlnAdx
         return rhs
-
-        

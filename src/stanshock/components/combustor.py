@@ -76,7 +76,7 @@ class Combustor:
             lambda _x, _t: True
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
-        self.include_pseudoshock = False #exclude pseudoshock in isolator
+        self.include_pseudoshock = False  # exclude pseudoshock in isolator
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
         # overwrite the default data
@@ -142,10 +142,9 @@ class Combustor:
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
+
         if self.include_pseudoshock:
             self.pseudoshock = Pseudoshock(
-                hydraulic_diameter=self.geometry.hydraulic_diameter,
-                characteristic_length=self.geometry.characteristic_length,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
 
@@ -496,7 +495,7 @@ class Combustor:
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
-    def advance_pseudoshock(self,dt):
+    def advance_pseudoshock(self, dt):
         """
         This method advances the pseudoshock solution
             inputs
@@ -504,17 +503,18 @@ class Combustor:
         """
         y = self.physics.primitive_to_conservative(self.state)
 
-        #Get RHS
-        dydt = self.pseudoshock.source(self.t, y, self.physics, self.state.gamma,self.geometry)
+        # Get RHS
+        dydt = self.pseudoshock.source(
+            self.t, y, self.physics, self.state.gamma, self.geometry
+        )
 
-        #Single forward-Euler step
+        # Single forward-Euler step
         y += dydt * dt
 
-        #Update
+        # Update
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
-
 
     def advance_source_terms(self, dt):
         """
