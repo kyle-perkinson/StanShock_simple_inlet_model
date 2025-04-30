@@ -6,14 +6,24 @@ from stanshock.system.backend import Array
 
 class RightHandSide:
     def source(
-        self, time: float, state_array: Array, physics: FluidPhysics, gamma_star: Array
+        self,
+        time: float,
+        state_array: Array,
+        physics: FluidPhysics,
+        gamma_star: Array,
+        *args,
     ) -> Array:
         """Compute the temporal gradient of the current state of the system."""
         state = physics.conservative_to_primitive(state_array, gamma_star)
-        return self.source_from_primitives(time, state, physics)
+        state.gamma = gamma_star
+        return self.source_from_primitives(time, state, physics, *args)
 
     def source_from_primitives(
-        self, time: float, state: FluidState, physics: FluidPhysics
+        self,
+        time: float,
+        state: FluidState,
+        physics: FluidPhysics,
+        *args,
     ) -> Array:
         state_array = physics.primitive_to_conservative(state)
-        return self.source(time, state_array, physics, state.gamma)
+        return self.source(time, state_array, physics, state.gamma, *args)
