@@ -50,26 +50,26 @@ def main(
     Delta = 10 * (xUpper - xLower) / float(nXFine)
     x = np.linspace(xLower, xUpper, nXCoarse)
 
-    def d_inner(x):
+    def d_inner(x, _t):
         return np.zeros_like(x)
 
-    def dd_inner_dx(x):
+    def dd_inner_dx(x, _t):
         return np.zeros_like(x)
 
-    def d_outer(x):
+    def d_outer(x, _t):
         return smoothing_function(x, xShock, Delta, DDriver, DDriven)
 
-    def dd_outer_dx(x):
+    def dd_outer_dx(x, _t):
         return smoothing_function_gradient(x, xShock, Delta, DDriver, DDriven)
 
-    def A(x):
-        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
+    def A(x, t):
+        return np.pi / 4.0 * (d_outer(x, t) ** 2.0 - d_inner(x, t) ** 2.0)
 
-    def dA_dx(x):
-        return np.pi / 2.0 * (d_outer(x) * dd_outer_dx(x) - d_inner(x) * dd_inner_dx(x))
+    def dA_dx(x, t):
+        return np.pi / 2.0 * (d_outer(x, t) * dd_outer_dx(x, t) - d_inner(x, t) * dd_inner_dx(x, t))
 
     def dlnA_dx(x, t):
-        return dA_dx(x) / A(x)
+        return dA_dx(x, t) / A(x, t)
 
     # compute the gas dynamics
     def res(Ms1):
@@ -170,8 +170,8 @@ def main(
         diagram.plot()
 
     xInsert = ss.geometry.x
-    d_outer_insert = ss.geometry.d_outer(ss.geometry.x)
-    d_inner_insert = ss.geometry.d_inner(ss.geometry.x)
+    d_outer_insert = ss.geometry.d_outer(ss.geometry.x, 0)
+    d_inner_insert = ss.geometry.d_inner(ss.geometry.x, 0)
 
     # recalculate at higher resolution without the insert
     gas1.TPX = T1, p1, "AR:1"

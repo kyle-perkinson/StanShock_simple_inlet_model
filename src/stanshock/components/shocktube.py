@@ -126,7 +126,7 @@ class ShockTube(Combustor):
 
         def dd_outerdx(x):
             return (
-                geometry.d_outer(x) / 2.0 * dlnA_dx_initial(x, 0.0)
+                geometry.d_outer(x, 0.0) / 2.0 * dlnA_dx_initial(x, 0.0)
             )  # assume temporally constant area
 
         # Determine geometry from pressure
@@ -137,7 +137,7 @@ class ShockTube(Combustor):
         (xMin, xMax, probeLocation) = (geometry.x[0], xShock, geometry.x[-1])
         LMax = xMax - xMin  # maximum length of constrained optimization
         DMax = min(
-            geometry.d_outer(np.linspace(xMin, xMax))
+            geometry.d_outer(np.linspace(xMin, xMax), 0.0)
         )  # maximum diameter of constrained optimization
         smoothingLength = 10 * geometry.dx
         if LMax <= smoothingLength:
@@ -169,44 +169,44 @@ class ShockTube(Combustor):
             xIns0, xIns1 = xMin + LInsert * alpha, xMin + LInsert
             AIns0 = np.pi * DInsert**2.0 / 4.0
 
-            def AInsert(x):
+            def AInsert(x, _t):
                 AIns = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 AIns[inds] = AIns0 * (1.0 - (x[inds] - xIns0) / (xIns1 - xIns0))
                 AIns[x < xIns0] = AIns0
                 return AIns
 
-            def dAInsertdx(x):
+            def dAInsertdx(x, _t):
                 dAInsdx = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 dAInsdx[inds] = -AIns0 / (xIns1 - xIns0)
                 return dAInsdx
 
-            def d_inner(x):
-                return np.sqrt(4.0 * AInsert(x) / np.pi)
+            def d_inner(x, t):
+                return np.sqrt(4.0 * AInsert(x, t) / np.pi)
 
-            def dd_innerdx(x):
+            def dd_innerdx(x, t):
                 dDIndx = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 dDIndx[inds] = (
                     0.5
-                    * (4.0 * AInsert(x[inds]) / np.pi) ** -0.5
-                    * (4.0 * dAInsertdx(x[inds]) / np.pi)
+                    * (4.0 * AInsert(x[inds], t) / np.pi) ** -0.5
+                    * (4.0 * dAInsertdx(x[inds], t) / np.pi)
                 )
                 return dDIndx
 
-            def A(x):
-                return np.pi / 4.0 * (geometry.d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
+            def A(x, t):
+                return np.pi / 4.0 * (geometry.d_outer(x, t) ** 2.0 - d_inner(x, t) ** 2.0)
 
-            def dA_dx(x):
+            def dA_dx(x, t):
                 return (
                     np.pi
                     / 2.0
-                    * (geometry.d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
+                    * (geometry.d_outer(x, t) * dd_outerdx(x) - d_inner(x, t) * dd_innerdx(x, t))
                 )
 
             # initialize (may be at a previous state in the optimization)
-            geometry.dlnA_dx = lambda x, _t: dA_dx(x) / A(x)
+            geometry.dlnA_dx = lambda x, t: dA_dx(x, t) / A(x, t)
             geometry.d_inner = d_inner
             self.state = FluidState(
                 shape=(geometry.n,),

@@ -77,10 +77,10 @@ def main(
     # dd_outerInsertdx = (d_outerInsertFront - d_outerInsertBack) / LOuterInsert
     DeltaSmoothingFunction = (xUpper - xLower) / float(nX) * 10.0
 
-    def d_outer(x):
+    def d_outer(_x, _t):
         return DDriven * np.ones(nX)
 
-    def d_inner(x):
+    def d_inner(x, _t):
         diameter = np.zeros(nX)
         diameter += smoothing_function(
             x, xLower + LInnerInsert, DeltaSmoothingFunction, d_innerInsert, 0.0
@@ -101,10 +101,10 @@ def main(
         )
         return diameter
 
-    def dd_outerdx(x):
+    def dd_outerdx(_x, _t):
         return np.zeros(nX)
 
-    def dd_innerdx(x):
+    def dd_innerdx(x, _t):
         dDiameterdx = np.zeros(nX)
         dDiameterdx += smoothing_function_gradient(
             x, xLower + LInnerInsert, DeltaSmoothingFunction, d_innerInsert, 0.0
@@ -125,14 +125,18 @@ def main(
         )
         return dDiameterdx
 
-    def A(x):
-        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
+    def A(x, t):
+        return np.pi / 4.0 * (d_outer(x, t) ** 2.0 - d_inner(x, t) ** 2.0)
 
-    def dA_dx(x):
-        return np.pi / 2.0 * (d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
+    def dA_dx(x, t):
+        return (
+            np.pi
+            / 2.0
+            * (d_outer(x, t) * dd_outerdx(x, t) - d_inner(x, t) * dd_innerdx(x, t))
+        )
 
     def dlnA_dx(x, t):
-        return dA_dx(x) / A(x)
+        return dA_dx(x, t) / A(x, t)
 
     # set up solver parameters
     print("Solving with boundary layer terms")

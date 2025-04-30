@@ -114,27 +114,31 @@ def main(
     )
     dDInterpdxInterp = (dInterp[1:] - dInterp[:-1]) / (xInterp[1:] - xInterp[:-1])
 
-    def d_outer(x):
+    def d_outer(x, _t):
         nX = x.shape[0]
         return DDriven * np.ones(nX)
 
-    def d_inner(x):
+    def d_inner(x, _t):
         return np.interp(x, xInterp, dInterp)
 
-    def dd_outerdx(x):
+    def dd_outerdx(_x, _t):
         return np.zeros(nX)
 
-    def dd_innerdx(x):
+    def dd_innerdx(x, t):
         return np.interp(x, xInterp[:-1], dDInterpdxInterp)
 
-    def A(x):
-        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
+    def A(x, t):
+        return np.pi / 4.0 * (d_outer(x, t) ** 2.0 - d_inner(x, t) ** 2.0)
 
-    def dA_dx(x):
-        return np.pi / 2.0 * (d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
+    def dA_dx(x, t):
+        return (
+            np.pi
+            / 2.0
+            * (d_outer(x, t) * dd_outerdx(x, t) - d_inner(x, t) * dd_innerdx(x, t))
+        )
 
     def dlnA_dx(x, t):
-        return dA_dx(x) / A(x)
+        return dA_dx(x, t) / A(x, t)
 
     # solve with boundary layer model
     boundary_conditions = ["reflecting", "reflecting"]
@@ -170,7 +174,7 @@ def main(
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
     dx = ssbl.geometry.x[1] - ssbl.geometry.x[0]
-    dV = A(ssbl.geometry.x) * dx
+    dV = A(ssbl.geometry.x, 0) * dx
     VDriver = np.sum(dV[ssbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
@@ -227,7 +231,7 @@ def main(
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
     dx = ssnbl.geometry.x[1] - ssnbl.geometry.x[0]
-    dV = A(ssnbl.geometry.x) * dx
+    dV = A(ssnbl.geometry.x, 0) * dx
     VDriver = np.sum(dV[ssnbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center

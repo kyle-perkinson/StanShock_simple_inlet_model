@@ -71,26 +71,26 @@ def main(
     )  # diffuse area change for numerical stability
 
     # DeltaX = 0.75 #from Eduardo's case
-    def D(x):
+    def D(x, _t):
         diameter = DDriven + (DeltaD / DeltaX) * (x - xShock)
         diameter[x < (xShock - DeltaX)] = DDriver
         diameter[x > xShock] = DDriven
         return diameter
 
-    def dD_dx(x):
+    def dD_dx(x, _t):
         dDiameterdx = np.ones(len(x)) * (DeltaD / DeltaX)
         dDiameterdx[x < (xShock - DeltaX)] = 0.0
         dDiameterdx[x > xShock] = 0.0
         return dDiameterdx
 
-    def A(x):
-        return np.pi / 4.0 * D(x) ** 2.0
+    def A(x, t):
+        return np.pi / 4.0 * D(x, t) ** 2.0
 
-    def dA_dx(x):
-        return np.pi / 2.0 * D(x) * dD_dx(x)
+    def dA_dx(x, t):
+        return np.pi / 2.0 * D(x, t) * dD_dx(x, t)
 
     def dlnA_dx(x, t):
-        return dA_dx(x) / A(x)
+        return dA_dx(x, t) / A(x, t)
 
     # set up solver parameters
     print("Solving with boundary layer terms")
