@@ -218,3 +218,89 @@ def plot_state(domain, filename):
     plt.tight_layout()
     plt.savefig(filename, bbox_inches="tight", dpi=300)
     plt.close()
+
+import matplotlib.pyplot as plt
+import numpy as np
+from pathlib import Path
+
+
+class SnapshotDiagram:
+    """
+    This class stores and plots snapshots of a given variable over the spatial domain at selected time intervals.
+    
+    Inputs:
+        domain: simulation domain with geometry and state
+        variable: string specifying the variable to plot (e.g., "pressure", "temperature")
+        skipSteps: number of iterations between updates
+        x: mesh for interpolation (defaults to domain mesh)
+    """
+
+    def __init__(self, domain, variable, skipSteps=0, x=None):
+        self.name = variable.lower()
+        self.skipSteps = skipSteps
+        self.x = x if x is not None else domain.geometry.x
+
+        self.snapshots = []  # List of (time, interpolated variable array)
+        self.counter = 0
+
+        self.update(domain)
+
+    def update(self, domain):
+        if self.counter % self.skipSteps != 0:
+            self.counter += 1
+            return
+
+        state = domain.state
+        geometry = domain.geometry
+        physics = domain.physics
+        x = self.x
+        variable = self.name
+
+        if variable in ["density", "r", "rho"]:
+            y = np.interp(x, geometry.x, state.density)
+        elif variable in ["velocity", "u"]:
+            y = np.interp(x, geometry.x, state.velocity)
+        elif variable in ["pressure", "p"]:
+            y = np.interp(x, geometry.x, state.pressure / 1e5)  # Convert to bar
+        elif variable in ["temperature", "t"]:
+            T = physics.get_temperature(state)
+            y = np.interp(x, geometry.x, T)
+        elif variable in ["gamma", "g"]:
+            y = np.interp(x, geometry.x, state.gamma)
+        elif variable in ["mach", "m"]:
+            M = np.abs(state.velocity) / physics.get_sound_speed(state)
+            y = np.interp(x, geometry.x, M)
+        elif variable in physics.scalar_names:
+            i = physics.scalar_names.index(variable)
+            y = np.interp(x, geometry.x, state.composition[:, i])
+        else:
+            raise Exception(f"Invalid Variable Name: {variable}")
+
+        self.snapshots.append((domain.t, y))
+        self.counter += 1
+
+    def plot(self, figdir="."):
+        """
+        Plot snapshots over the domain at each sampled time
+        """
+        plt.figure()
+        for t, y in self.snapshots:
+            plt.plot(self.x, y, label=f"{t*1e3:.2f} ms")
+
+        plt.xlabel("x [m]")
+        var_label = {
+            "pressure": "p [bar]",
+            "temperature": "T [K]",
+            "density": r"$\rho$ [kg/m³]",
+            "velocity": "u [m/s]",
+            "gamma": r"$\gamma$",
+            "mach": "M"
+        }.get(self.name, self.name)
+        plt.ylabel(var_label)
+        plt.title(f"{var_label} snapshots")
+        plt.legend(loc="best", fontsize="small", ncol=2)
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(Path(figdir) / f"{self.name}_snapshots.png", dpi=300)
+        plt.close()
+

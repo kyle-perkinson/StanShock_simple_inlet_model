@@ -68,6 +68,7 @@ class Combustor:
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
         self.xt_diagrams = []  # list of XT diagram objects
+        self.snapshot_diagrams = []
         self.skin_friction_coefficient = None  # skin friction functor
         self.optimization_iteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
@@ -507,14 +508,17 @@ class Combustor:
         dydt = self.pseudoshock.source(
             self.t, y, self.physics, self.state.gamma, self.geometry
         )
-
-        # Single forward-Euler step
-        y += dydt * dt
-
-        # Update
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
+        self.state.pressure = dydt[:,1]
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
+        # if self.t < 0:
+            # Single forward-Euler step
+            # y += dydt * dt
+
+            # Update
+            # self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
+            # self.state.temperature = self.physics.get_temperature(self.state)
+            # self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_source_terms(self, dt):
         """
@@ -590,6 +594,11 @@ class Combustor:
             if iters % (XTDiagram.skipSteps + 1) == 0:
                 XTDiagram.update(self)
 
+    def update_snapshot_diagrams(self,iters):
+        for SnapshotDiagram in self.snapshot_diagrams:
+            if iters % (SnapshotDiagram.skipSteps + 1) == 0:
+                SnapshotDiagram.update(self)
+
     def advance_simulation(self, tFinal, res_p_target=-1.0):
         """
         This method advances the simulation until the prescribed time, tFinal
@@ -627,6 +636,7 @@ class Combustor:
             self.t += dt
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
+            self.update_snapshot_diagrams(iters)
             iters += 1
             res_p = np.linalg.norm(self.state.pressure - p_old)
             if self.verbose and iters % self.output_every == 0:

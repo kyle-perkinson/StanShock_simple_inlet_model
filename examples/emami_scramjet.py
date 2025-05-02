@@ -10,7 +10,7 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.thermotable import ThermoTable
-from stanshock.processing.plot import XTDiagram
+from stanshock.processing.plot import XTDiagram, SnapshotDiagram
 
 plt.rcParams.update(
     {
@@ -114,7 +114,7 @@ p2 = 8278.763  # nozzle exit static pressure, Pa
 # Time parameters
 t_stab = 0.0025
 t_close = 0.8  # duration of closing nozzle
-tFinal = 1
+tFinal = t_stab
 AR_i = 4.15
 AR_f = 1
 
@@ -122,7 +122,7 @@ physics_model = ThermoTable(gas1)
 
 # Define the grid
 N_x = 1000
-xShock = 0.01 * L_iso
+xShock = 0.1 * L_iso
 
 
 def D_H(x, t):
@@ -264,16 +264,7 @@ try:
     )
 
     import traceback
-
     t0 = time.perf_counter()
-    ss.advance_simulation(tFinal)
-    t1 = time.perf_counter()
-    print("The process took ", t1 - t0)
-except Exception as e:
-    print("An error occurred:", e)
-    print("Full traceback:")
-    traceback.print_exc()
-finally:
     plot_variables = [
         "density",
         "velocity",
@@ -282,8 +273,20 @@ finally:
         "mach",
     ]
     ss.xt_diagrams = [
-        XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+    XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
+
+    ss.snapshot_diagrams = [
+    SnapshotDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+    ]
+    ss.advance_simulation(tFinal)
+    t1 = time.perf_counter()
+    print("The process took ", t1 - t0)
+except Exception as e:
+    print("An error occurred:", e)
+    print("Full traceback:")
+    traceback.print_exc()
+finally:
     for diagram in ss.xt_diagrams:
         diagram.plot(figdir=figdir)
-    code.interact(local=locals())
+    # code.interact(local=locals())
