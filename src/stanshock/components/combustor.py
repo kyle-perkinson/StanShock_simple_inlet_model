@@ -491,6 +491,7 @@ class Combustor:
         # Single forward-Euler step
         y += dydt * dt
 
+
         # Update
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
@@ -508,17 +509,12 @@ class Combustor:
         dydt = self.pseudoshock.source(
             self.t, y, self.physics, self.state.gamma, self.geometry
         )
-        self.state.pressure = dydt[:,1]
+        y += dydt * dt
+
+        # Update
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
-        # if self.t < 0:
-            # Single forward-Euler step
-            # y += dydt * dt
-
-            # Update
-            # self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
-            # self.state.temperature = self.physics.get_temperature(self.state)
-            # self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_source_terms(self, dt):
         """

@@ -9,6 +9,8 @@ from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry
 from matplotlib import pyplot as plt
+import copy
+
 
 
 class Pseudoshock(RightHandSide):
@@ -31,6 +33,7 @@ class Pseudoshock(RightHandSide):
     ) -> None:
         self.xShock_array = []
         self.sInd_array = []
+        self.time_array = []
 
         self.skin_friction_coefficient = skin_friction_coefficient
         if self.skin_friction_coefficient is None:
@@ -57,12 +60,24 @@ class Pseudoshock(RightHandSide):
         dpdx = np.gradient(p, x)
         shock_inds = np.where(dpdx > 0)[0]
         if time == 0:
-            sInd = shock_inds[0]
+            sInd_peak = np.argmax(dpdx)
+            buffer = 2
+            sInd = max(sInd_peak - buffer, 0)
         else:
+            # prev_xShock = self.xShock_array[-1]
             sInd = shock_inds[np.argmin(np.abs(x[shock_inds] - self.xShock_array[-1]))]
+            # max_inds = np.argwhere(dpdx == np.max(dpdx)).flatten()
+            # closest_ind = max_inds[np.argmin(np.abs(x[max_inds] - prev_xShock))]
+            # sInd = closest_ind
         xShock = x[sInd]
         self.xShock_array.append(xShock)
         self.sInd_array.append(sInd)
+        self.time_array.append(time)
+        if time > 0.0025:
+            plt.figure()
+            plt.plot(self.time_array,self.xShock_array)
+            plt.show()
+            
     def M_Ar_Derivatives(self, _x, y, g1, q1, k0, kappa, norm_int, cf0, cf_model, Dh):
         M2, Aratio, p = y
         q = g1 * M2 * p / 2
@@ -86,9 +101,9 @@ class Pseudoshock(RightHandSide):
         geometry: Geometry,
     ) -> Array:
         x = geometry.x
+        ps_state = copy.deepcopy(state)
         dp = np.zeros_like(x)
         sIndc = self.sInd_array[-1]
-        M_arr = state.velocity/physics.get_sound_speed(state)
         M1 = state.velocity[sIndc] / physics.get_sound_speed(state)[sIndc]
         if M1 < 1.3:
             return dp
@@ -125,36 +140,23 @@ class Pseudoshock(RightHandSide):
                 events=reattachment,
                 args=(g1, q1, k0, kappa, norm_int, cf0, cf_model, Dh),
             )
-            # if time == 0:
-            #     i_end = sIndc + len(pseudo_solve.t)
-            #     dp_init = np.copy(state.pressure)
-            #     dp_init[sIndc:i_end] = pseudo_solve.y[2]
-            #     state.pressure = dp_init
-            # else:
+
+            Re_prior = (state.velocity * Dh * state.density) / physics.get_mu(state)
+            cf_prior = self.skin_friction_coefficient(Re_prior)
+            shear_prior = (cf_prior * 0.5 * state.density * state.velocity**2) * np.sign(state.velocity)
+
             L_ps = pseudo_solve.t_events[0]
             x2 = L_ps + x[sIndc]
             w_mask = (x > (x2 - L_ps/2)) & (x < (x2 + L_ps/2))
             p_pseudo = pseudo_solve.y[2]
             p_pseudo_windowed = p_pseudo[w_mask]
             p_curr_windowed = state.pressure[w_mask]
-            i_local_min = np.argmin(np.abs(p_pseudo_windowed - p_curr_windowed))
+
+            i_min_p = np.argmin(np.abs(p_pseudo_windowed - p_curr_windowed))
             global_indices = np.where(w_mask)[0]
-            i_end = global_indices[i_local_min]
-            # if time == 0:
-            dp = np.copy(state.pressure)
-            dp[sIndc:i_end] = (pseudo_solve.y[2])[:i_end-sIndc]
-            # else:
-            #     dp[sIndc:i_end] = (pseudo_solve.y[2])[:i_end-sIndc]  - state.pressure[sIndc:i_end]
-
-            
-            
-
-            # plt.figure()
-            # plt.plot(x,dp,label='pseudoshock')
-            # plt.plot(x,state.pressure,label='existing')
-            # # plt.plot(x,pseudo_solve.y[1])
-            # plt.legend()
-            # plt.show()
+            i_end_p = global_indices[i_min_p]
+            tau = 1e-5
+            dp[sIndc:i_end_p] = (p_pseudo[sIndc:i_end_p] - state.pressure[sIndc:i_end_p])*(1 - np.exp(-time/tau)) - shear_prior[sIndc:i_end_p]
             return dp
 
     def source_from_primitives(
@@ -168,7 +170,7 @@ class Pseudoshock(RightHandSide):
         rhs = np.zeros((*state.shape, 3 + physics.n_scalars))
         # Pseudoshock pressure addition
         self.get_shock_location(time, state, geometry)
-        p_pseudo = self.get_pseudoshock_profile(time, state, physics, geometry)
-        tau = 1e-3
-        rhs[:, 1] = p_pseudo#  * np.exp(-time / tau)
+        deltap = self.get_pseudoshock_profile(time, state, physics, geometry)
+        Dh = geometry.d_outer(geometry.x, time)
+        rhs[:, 1] =  -4.0 / Dh * deltap
         return rhs
