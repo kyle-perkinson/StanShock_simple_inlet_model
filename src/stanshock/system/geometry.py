@@ -6,6 +6,7 @@ from scipy import integrate
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
+from scipy.sparse import diags
 
 
 class Geometry(RightHandSide):
@@ -19,11 +20,18 @@ class Geometry(RightHandSide):
         d_outer=None,
         dlnA_dt=None,
         dlnA_dx=None,
+        upper_wall = None,
+        lower_wall = None,
+        regions: dict[str, tuple[float, float]] = None
     ) -> None:
         self.time = t
         self.x = x
         self.n = len(self.x)
         self.dx = self.x[1] - self.x[0]
+        if upper_wall is not None and lower_wall is not None:
+            self.lower_wall = lower_wall
+            self.upper_wall = upper_wall
+        self.regions = regions or {}
 
         self.h = h
         self.w = w
@@ -51,8 +59,9 @@ class Geometry(RightHandSide):
                 noInsert = self.d_inner(self.x, self.time) == 0.0
                 self.characteristic_length[noInsert] = self.hydraulic_diameter[noInsert]
 
-        self.integrator = integrate.ode(self.source_fast).set_integrator("lsoda")
-
+        # self.integrator = integrate.ode(self.source_fast).set_integrator("lsoda")
+        self.integrator = integrate.ode(self.source_fast, jac=self.source_fast_jacobian_banded).set_integrator("lsoda", lband=0, uband=0)
+        # self.integrator = integrate.ode(self.source_fast, jac=None).set_integrator("lsoda", lband=0, uband=0)
         # Define global indices
         self.idx_locations = np.s_[:]
         self.idx_source_terms = np.s_[:3]
@@ -78,6 +87,7 @@ class Geometry(RightHandSide):
                 args = [self.x[idx_implicit], gamma_star[idx_implicit]]
                 self.integrator.set_initial_value(y0, time)
                 self.integrator.set_f_params(args)
+                self.integrator.set_jac_params(args)
                 self.integrator.integrate(time + dt)
                 rhs[idx_implicit] = (
                     self.integrator.y - state_array[idx_implicit, self.idx_source_terms]
@@ -130,3 +140,24 @@ class Geometry(RightHandSide):
             rhs[n : 2 * n] -= (ru**2.0 / r) * dlnAdx
             rhs[2 * n : 3 * n] -= (ru / r * (E + p)) * dlnAdx
         return rhs
+    
+
+    def source_fast_jacobian_banded(self, time: float, y: Array, args: tuple[Array, Array]):
+        x = args[0]
+        gamma = args[1]
+        n = len(x)
+        r = y[0:n]
+        ru = y[n : 2 * n]
+        E = y[2 * n : 3 * n]
+        p = (gamma - 1) * (E - 0.5 * ru**2 / r)
+
+        dlnAdt = self.dlnA_dt(x, time) if self.dlnA_dt is not None else np.zeros_like(x)
+        dlnAdx = self.dlnA_dx(x, time) if self.dlnA_dx is not None else np.zeros_like(x)
+
+        J_diag = np.zeros(3 * n)
+
+        # Diagonal entries per variable
+        J_diag[0:n]       = -dlnAdt                         # ∂R/∂ρ
+        J_diag[n:2*n]     = -dlnAdt                         # ∂R/∂(ρu)
+        J_diag[2*n:3*n]   = -dlnAdt - (ru / r) * gamma * dlnAdx     # ∂R/∂E
+        return J_diag.reshape(1, 3*n)  # shape (1, 3n): banded with 0 lower and upper bandwidth

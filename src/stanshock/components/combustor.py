@@ -14,7 +14,7 @@ from stanshock.processing.initialize import (
     initialize_diffuse_interface,
     initialize_riemann_problem,
 )
-from stanshock.processing.plot import plot_state
+from stanshock.processing.plot import plot_state, get_state_plot_bounds
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry
 
@@ -60,6 +60,8 @@ class Combustor:
         )
         self.dlnA_dt = None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
         self.dlnA_dx = None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
+        self.upper_wall = None #Input: 2 x N list: 1st row is x_locs, 2nd row either "wall" or "open". Used for simulating freestream or internal flow (ceiling)
+        self.lower_wall = None # Same format and meaning as upper_wall, but for floor
         self.include_boundary_layer = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
         self.source_terms: RightHandSide | None = None  # source term function
@@ -78,8 +80,10 @@ class Combustor:
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
         self.include_pseudoshock = False  # exclude pseudoshock in isolator
+        self.regions = None
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
+        self.limits = []
         # overwrite the default data
         for key, item in kwargs.items():
             if key in self.__dict__:
@@ -95,6 +99,9 @@ class Combustor:
             self.d_outer,
             self.dlnA_dt,
             self.dlnA_dx,
+            self.upper_wall,
+            self.lower_wall,
+            self.regions
         )
 
         # set the number of scalars
@@ -145,9 +152,14 @@ class Combustor:
             )
 
         if self.include_pseudoshock:
-            self.pseudoshock = Pseudoshock(
-                skin_friction_coefficient=self.skin_friction_coefficient,
-            )
+            if self.regions is None:
+                raise ValueError("Error: Regions must be specified to use pseudoshock.")
+            if "isolator" in self.regions:
+                self.pseudoshock = Pseudoshock(
+                    skin_friction_coefficient=self.skin_friction_coefficient,
+                )
+            else:
+                raise ValueError("Error: 'isolator' must be specified in regions to use pseudoshock.")
 
     def get_wave_speed(self):
         """
@@ -486,7 +498,7 @@ class Combustor:
         y = self.physics.primitive_to_conservative(self.state)
 
         # Get RHS
-        dydt = self.boundary_layer.source(self.t, y, self.physics, self.state.gamma)
+        dydt = self.boundary_layer.source(self.t, y, self.physics, self.state.gamma, self.geometry)
 
         # Single forward-Euler step
         y += dydt * dt
@@ -504,10 +516,9 @@ class Combustor:
                 dt=time step
         """
         y = self.physics.primitive_to_conservative(self.state)
-
         # Get RHS
         dydt = self.pseudoshock.source(
-            self.t, y, self.physics, self.state.gamma, self.geometry
+        self.t, y, self.physics, self.state.gamma, self.geometry
         )
         y += dydt * dt
 
@@ -628,6 +639,8 @@ class Combustor:
                 self.advance_source_terms(dt)
             if self.injector is not None:
                 self.advance_injector(dt)
+            if self.t == 0:
+                self.limits = get_state_plot_bounds(self)
             # perform other updates
             self.t += dt
             self.update_probes(iters)
@@ -647,4 +660,5 @@ class Combustor:
                 plot_state(
                     self,
                     f"figures/anim/test_{iters // self.plot_state_interval:05d}.png",
+                    self.limits,
                 )
