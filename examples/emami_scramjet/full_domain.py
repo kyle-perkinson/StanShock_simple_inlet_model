@@ -124,8 +124,8 @@ N_x = 1000
 xShock = 0.1 * L_iso
 
 
-def D_H(x, t):
-    return (2 * W * H(x, t)) / (W + H(x, t))
+def D_H(t, x):
+    return (2 * W * H(t, x)) / (W + H(t, x))
 
 
 def AR(t):  # nozzle to throat area ratio (from Deng et al)
@@ -152,7 +152,7 @@ def dAR_dt(t):  # nozzle to throat area time derivative ratio (from Deng et al)
     return dAstar_At_dt
 
 
-def H(x, t):
+def H(t, x):
     x = np.asarray(x)  # ensure x is an array
     heights = np.zeros_like(x, dtype=float)
 
@@ -183,7 +183,7 @@ def H(x, t):
     return heights
 
 
-def dHdx(x, t):
+def dHdx(t, x):
     x = np.asarray(x)  # ensure x is an array
     dH_dx = np.zeros_like(x, dtype=float)
     mask_iso = (x >= 0) & (x <= x1)
@@ -200,7 +200,7 @@ def dHdx(x, t):
     return dH_dx
 
 
-def dHdt(x, t):
+def dHdt(t, x):
     x = np.asarray(x)
     dH_dt = np.zeros_like(x)
     mask_noz = (x > x4) & (x <= x5)
@@ -212,24 +212,24 @@ def dHdt(x, t):
 x = np.linspace(0, x5, N_x)
 
 
-def A(x, t):
-    return H(x, t) * W
+def A(t, x):
+    return H(t, x) * W
 
 
-def dAdx(x, t):
-    return W * dHdx(x, t)
+def dAdx(t, x):
+    return W * dHdx(t, x)
 
 
-def dAdt(x, t):
-    return W * dHdt(x, t)
+def dAdt(t, x):
+    return W * dHdt(t, x)
 
 
-def dlnAdx(x, t):
-    return dAdx(x, t) / A(x, t)
+def dlnAdx(t, x):
+    return dAdx(t, x) / A(t, x)
 
 
-def dlnAdt(x, t):
-    return dAdt(x, t) / A(x, t)
+def dlnAdt(t, x):
+    return dAdt(t, x) / A(t, x)
 
 
 # Define the boundary conditions

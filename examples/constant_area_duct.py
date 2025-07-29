@@ -95,21 +95,21 @@ N_x = 500
 xShock = 0.5 * L_iso
 
 
-def D_H(x, t):
-    return (2 * W * H(x, t)) / (W + H(x, t))
+def D_H(t, x):
+    return (2 * W * H(t, x)) / (W + H(t, x))
 
 
-def H(x, t):
+def H(t, x):
     x = np.asarray(x)  # ensure x is an array
     return np.ones_like(x, dtype=float) * H_th
 
 
-def dHdx(x, t):
+def dHdx(t, x):
     x = np.asarray(x)  # ensure x is an array
     return np.zeros_like(x, dtype=float)
 
 
-def dHdt(x, t):
+def dHdt(t, x):
     x = np.asarray(x)
     return np.zeros_like(x)
 
@@ -117,24 +117,24 @@ def dHdt(x, t):
 x = np.linspace(0, L_iso, N_x)
 
 
-def A(x, t):
-    return H(x, t) * W
+def A(t, x):
+    return H(t, x) * W
 
 
-def dAdx(x, t):
-    return W * dHdx(x, t)
+def dAdx(t, x):
+    return W * dHdx(t, x)
 
 
-def dAdt(x, t):
-    return W * dHdt(x, t)
+def dAdt(t, x):
+    return W * dHdt(t, x)
 
 
-def dlnAdx(x, t):
-    return dAdx(x, t) / A(x, t)
+def dlnAdx(t, x):
+    return dAdx(t, x) / A(t, x)
 
 
-def dlnAdt(x, t):
-    return dAdt(x, t) / A(x, t)
+def dlnAdt(t, x):
+    return dAdt(t, x) / A(t, x)
 
 
 # Define the boundary conditions
