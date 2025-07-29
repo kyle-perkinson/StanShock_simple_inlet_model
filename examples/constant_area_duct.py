@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import code
 import time
 from pathlib import Path
 
@@ -10,7 +9,7 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.thermotable import ThermoTable
-from stanshock.processing.plot import XTDiagram, SnapshotDiagram
+from stanshock.processing.plot import SnapshotDiagram, XTDiagram
 
 plt.rcParams.update(
     {
@@ -99,22 +98,20 @@ xShock = 0.5 * L_iso
 def D_H(x, t):
     return (2 * W * H(x, t)) / (W + H(x, t))
 
+
 def H(x, t):
     x = np.asarray(x)  # ensure x is an array
-    heights = np.ones_like(x, dtype=float)*H_th
-    return heights
+    return np.ones_like(x, dtype=float) * H_th
 
 
 def dHdx(x, t):
     x = np.asarray(x)  # ensure x is an array
-    dH_dx = np.zeros_like(x, dtype=float)
-    return dH_dx
+    return np.zeros_like(x, dtype=float)
 
 
 def dHdt(x, t):
     x = np.asarray(x)
-    dH_dt = np.zeros_like(x)
-    return dH_dt
+    return np.zeros_like(x)
 
 
 x = np.linspace(0, L_iso, N_x)
@@ -149,7 +146,7 @@ BCs = (BC_inlet, BC_outlet)
 # plt.figure()
 # plt.plot(x, A(x,0))
 # plt.show()
-#YOU COMMENTED OUT RHS!!!
+# YOU COMMENTED OUT RHS!!!
 try:
     # Initialize and run the simulation
     ss = Combustor(
@@ -171,6 +168,7 @@ try:
     )
 
     import traceback
+
     t0 = time.perf_counter()
     plot_variables = [
         "density",
@@ -180,11 +178,11 @@ try:
         "mach",
     ]
     ss.xt_diagrams = [
-    XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+        XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
 
     ss.snapshot_diagrams = [
-    SnapshotDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+        SnapshotDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()

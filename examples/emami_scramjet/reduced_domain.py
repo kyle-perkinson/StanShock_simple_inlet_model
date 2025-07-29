@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-import code
 import time
+import traceback
+from datetime import datetime
 from pathlib import Path
-import os
-import glob
 
 import cantera as ct
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import interpolate
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
 from stanshock.processing.splicer import splicer
-from datetime import datetime
-from scipy import interpolate
 
 plt.rcParams.update(
     {
@@ -43,19 +41,36 @@ plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 # Plotting utilities
 scale = 1e3
-for ext in ('*.png', '*.mp4'):
-    for file in glob.glob(os.path.join('figures', ext)):
-        os.remove(file)
 
-# Delete .png and .mp4 in 'figures/anim/'
-for ext in ('*.png', '*.mp4'):
-    for file in glob.glob(os.path.join('figures', 'anim', ext)):
-        os.remove(file)
+# Paths
+datadir = Path("./data")
+datadir.mkdir(exist_ok=True)
+figdir = Path("./figures")
+figdir.mkdir(exist_ok=True)
+animdir: Path = figdir / "anim"
+animdir.mkdir(exist_ok=True)
+resultsdir = Path("./xt_raw")
+resultsdir.mkdir(exist_ok=True)
 
-#TESTING
+windows_dir: Path = Path(
+    "/mnt/c/Users/nlain/OneDrive - Stanford/MAIN WORK/01_Research/06_Plots/00_Current_Deng_Runs"
+)
+copy_vid_path: Path = windows_dir / "01_movies"
+copy_img_path: Path = windows_dir / "00_plots"
+# splicer(tFinal, figdir / "anim", figdir, copy_vid_path)
+
+# Delete .png and .mp4 in 'figures/' and 'figures/anim/'
+for ext in ("*.png", "*.mp4"):
+    for file in figdir.glob(pattern=ext):
+        file.unlink(missing_ok=True)
+
+    for file in animdir.glob(pattern=ext):
+        file.unlink(missing_ok=True)
+
+# TESTING
 closing = True
 AR_i = 4.15
-pseudoshock= False
+pseudoshock = False
 desired_img_count = 400
 t_sim = 0.008
 N_x = 1500
@@ -67,76 +82,61 @@ t_stab = t_sim / 100
 t_close = 0.5 * t_sim
 tFinal = t_sim + t_stab
 
-if not closing:
-    AR_f = AR_i
-else:
-    AR_f = 1
+AR_f: float = AR_i if not closing else 1
 
 dt_estimate = 1e-6
 
 
-plot_interval = int(10 ** np.round(np.log10(tFinal  / (dt_estimate* desired_img_count))))
+plot_interval = int(
+    10 ** np.round(np.log10(tFinal / (dt_estimate * desired_img_count)))
+)
 
-
-# Data
-datadir = Path("./data")
-datadir.mkdir(exist_ok=True)
-figdir = Path("./figures")
-figdir.mkdir(exist_ok=True)
-(figdir / "anim").mkdir(exist_ok=True)
-resultsdir = Path("./xt_raw")
-resultsdir.mkdir(exist_ok=True)
-
-windows_dir = '/mnt/c/Users/nlain/OneDrive - Stanford/MAIN WORK/01_Research/06_Plots/00_Current_Deng_Runs'
-copy_vid_path = os.path.join(windows_dir, '01_movies')
-copy_img_path = os.path.join(windows_dir, '00_plots')
-# splicer(tFinal, figdir / "anim", figdir, copy_vid_path)
 
 # Chemistry
 mech = "data/mechanisms/N2O2HeAr.yaml"
-X_amb = 'O2:0.21 N2:0.79'
+X_amb = "O2:0.21 N2:0.79"
 gas = ct.Solution(mech)
 
 """
 GEOMETRY INPUTS
     from ("Experimental Investigation of Inlet-Combustor Isolators for a Dual-Mode Scramjet...")
 """
-Liso_Hth = 12.7 #ratio of isolator length to throat height
-H_th = 0.01016 #throat height
+Liso_Hth = 12.7  # ratio of isolator length to throat height
+H_th = 0.01016  # throat height
 # ~~~~~RELEVANT DIMENSIONS~~~~~~
-#~~Lengths~~
+# ~~Lengths~~
 lx = 0.15
-L_rp = 0.248158 		    #Ramp length, m
-H_rp = 0.048237             #Ramp height, m
-d1 = np.atan2(H_rp, L_rp) + np.radians(1) #Ramp angle,  rad
-L_iso = Liso_Hth*H_th       #Isolator length
+L_rp = 0.248158  # Ramp length, m
+H_rp = 0.048237  # Ramp height, m
+d1 = np.atan2(H_rp, L_rp) + np.radians(1)  # Ramp angle,  rad
+L_iso = Liso_Hth * H_th  # Isolator length
 
-L_dd = 0.129032		#Lower diffuser length
-L_cd = 0.272		#Lower combustor length
-L_fp = 0.150			#Total flap length
+L_dd = 0.129032  # Lower diffuser length
+L_cd = 0.272  # Lower combustor length
+L_fp = 0.150  # Total flap length
 
-L_fd = 0.080431 #flat section before diffuser
-L_du = 0.048601 #upper diffuser length
-L_cu = 0.267637 #upper comb chamber wall length
-L_nu = 0.076583  #upper nozzle narrowing section len
-L_fu = 0.078055  #upper nozzle flat section length
+L_fd = 0.080431  # flat section before diffuser
+L_du = 0.048601  # upper diffuser length
+L_cu = 0.267637  # upper comb chamber wall length
+L_nu = 0.076583  # upper nozzle narrowing section len
+L_fu = 0.078055  # upper nozzle flat section length
 
 H_rp = 0.048237
-H_bt = 0.012392 #bottom ramp height
-H_cc = 0.067106 #combustor total height
-H_noz = 0.009435 #upper nozzle height
+H_bt = 0.012392  # bottom ramp height
+H_cc = 0.067106  # combustor total height
+H_noz = 0.009435  # upper nozzle height
 
 
-#~~Cowl Geometry~~
+# ~~Cowl Geometry~~
 theta_cowl = np.radians(2.2)
-hyp_cowl = 0.0635 #m
+hyp_cowl = 0.0635  # m
 h_cowl = hyp_cowl * np.sin(theta_cowl)
 L_cowl = h_cowl / np.tan(theta_cowl)
 
-x_cle = L_rp - L_cowl*np.cos(theta_cowl)
+x_cle = L_rp - L_cowl * np.cos(theta_cowl)
 y_cle = (H_th + H_rp) - h_cowl
 
-#Upper Wall (cowl and after)
+# Upper Wall (cowl and after)
 xu1 = x_cle
 xu2 = L_rp
 xu3 = xu2 + L_iso + L_fd
@@ -155,15 +155,15 @@ yu6 = H_cc - H_noz
 yu7 = yu6
 y_u = np.array([yu1, yu2, yu3, yu4, yu5, yu6, yu7])
 
-#Lower Wall is time dependent-- see H(x,t)
-xd1 = x_cle  	
-xd2 = L_rp 
-xd3 = xd2 + L_iso 
+# Lower Wall is time dependent-- see H(x,t)
+xd1 = x_cle
+xd2 = L_rp
+xd3 = xd2 + L_iso
 xd4 = xd3 + L_dd
 xd5 = xd4 + L_cd
 x_d_incomp = np.array([xd1, xd2, xd3, xd4, xd5]) - xd1
 
-yd1 = xd1* (H_rp / L_rp)
+yd1 = xd1 * (H_rp / L_rp)
 yd2 = H_rp
 yd3 = H_rp
 yd4 = 0
@@ -208,18 +208,21 @@ BC_outlet = None, None, p2, None
 
 BCs = (BC_inlet, BC_outlet)
 
+
 def flap_coords(t):
     H_exit = H_th * AR(t)
     H_fp = H_cc - H_exit - H_noz
-    theta_fp = np.asin((H_fp / L_fp))
-    xf = (np.cos(theta_fp)*L_fp) + x_d_incomp[-1]
-    yf = np.sin(theta_fp)*L_fp
+    theta_fp = np.asin(H_fp / L_fp)
+    xf = (np.cos(theta_fp) * L_fp) + x_d_incomp[-1]
+    yf = np.sin(theta_fp) * L_fp
     x_flap = np.array([xf, L_tot])
     y_flap = np.array([yf, yf])
-    return x_flap, y_flap 
+    return x_flap, y_flap
 
-def D_H(x, t):
-    return (2 * W * H(x, t)) / (W + H(x, t))
+
+def D_H(t, x):
+    return (2 * W * H(t, x)) / (W + H(t, x))
+
 
 def AR(t):  # Nozzle-to-throat area ratio from Deng et al.
     t = np.atleast_1d(t)  # ensures t is always an array (1D at minimum)
@@ -245,7 +248,8 @@ def dAR_dt(t):  # nozzle to throat area time derivative ratio (from Deng et al)
     dAstar_At_dt[closing] = (AR_f - AR_i) / (t_close)
     return dAstar_At_dt
 
-def H(x, t):
+
+def H(t, x):
     x = np.asarray(x)
     x_fp, y_fp = flap_coords(t)
 
@@ -255,10 +259,10 @@ def H(x, t):
     y_d_arr = np.interp(x, x_d, y_d)
     y_u_arr = np.interp(x, x_u, y_u)
 
-    heights = y_u_arr - y_d_arr
-    return heights
+    return y_u_arr - y_d_arr
 
-# def grid_gen(x,t):
+
+# def grid_gen(t, x):
 #     x = np.asarray(x)
 #     x_fp, y_fp = flap_coords(t)
 #     x_d = np.append(x_d_incomp, x_fp)
@@ -283,19 +287,13 @@ def H(x, t):
 #     df.to_csv(os.path.join(resultsdir,"flowpath_coords.csv"), index=False)
 
 
-
-
-
-
-
-def dHdx(x, t):
+def dHdx(t, x):
     x = np.asarray(x)
-    dH_dx = np.zeros_like(x, dtype=float)
-    dH_dx = np.gradient(H(x,t), x)
-    return dH_dx
+    # dH_dx = np.zeros_like(x, dtype=float)
+    return np.gradient(H(t, x), x)
 
 
-def dHdt(x, t):
+def dHdt(t, x):
     x = np.asarray(x)
     dH_dt = np.zeros_like(x)
     x_fp, _ = flap_coords(t)
@@ -305,22 +303,26 @@ def dHdt(x, t):
     return dH_dt
 
 
-def A(x, t):
-    return H(x, t) * W
+def A(t, x):
+    return H(t, x) * W
 
-def dAdx(x, t):
-    return W * dHdx(x, t)
 
-def dAdt(x, t):
-    return W * dHdt(x, t)
+def dAdx(t, x):
+    return W * dHdx(t, x)
 
-def dlnAdx(x, t):
-    dlnA_dx =  np.gradient(np.log(A(x, t)), x)
+
+def dAdt(t, x):
+    return W * dHdt(t, x)
+
+
+def dlnAdx(t, x):
+    dlnA_dx = np.gradient(np.log(A(t, x)), x)
     dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx, kind="cubic")
     return dlnA_dx_interp(x)
 
-def dlnAdt(x, t):
-    return dAdt(x, t) / A(x, t)
+
+def dlnAdt(t, x):
+    return dAdt(t, x) / A(t, x)
 
 
 # Define the grid
@@ -335,9 +337,9 @@ try:
         x=x,
         dlnA_dx=dlnAdx,
         dlnA_dt=dlnAdt,
-        h = H,
-        w = W,
-        d_outer = D_H,
+        h=H,
+        w=W,
+        d_outer=D_H,
         regions=regions,
         wall_temperature=330.0,
         include_boundary_layer=True,
@@ -350,11 +352,19 @@ try:
         output_every=plot_interval,
         plot_state_interval=plot_interval,
     )
-    ss.probes.append(Probe(ss, x_d_incomp[1],skipSteps=10,probeName='isolator_inlet'))
-    ss.probes.append(Probe(ss, x_d_incomp[2], skipSteps=10, probeName= 'isolator_outlet'))
-    ss.probes.append(Probe(ss, ((x_d_incomp[3] + x_d_incomp[4]) / 2), skipSteps=10, probeName='backpressure'))
+    ss.probes.append(Probe(ss, x_d_incomp[1], skipSteps=10, probeName="isolator_inlet"))
+    ss.probes.append(
+        Probe(ss, x_d_incomp[2], skipSteps=10, probeName="isolator_outlet")
+    )
+    ss.probes.append(
+        Probe(
+            ss,
+            ((x_d_incomp[3] + x_d_incomp[4]) / 2),
+            skipSteps=10,
+            probeName="backpressure",
+        )
+    )
 
-    import traceback
     t0 = time.perf_counter()
     plot_variables = [
         "density",
@@ -364,7 +374,7 @@ try:
         "mach",
     ]
     ss.xt_diagrams = [
-    XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+        XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
@@ -377,62 +387,66 @@ finally:
     for diagram in ss.xt_diagrams:
         diagram.plot(figdir=figdir)
         diagram.save_to_csv(output_dir=resultsdir)
-    
+
     plt.figure(figsize=(4, 4))
 
     # Extract time and pressure data from probes, normalize by static pressure (originally at ramp inlet, but also as back pressure)
     t_AR = np.array(ss.probes[0].t)
-    t_iso_in = np.array(ss.probes[0].t) /tFinal
-    p_iso_in = np.array(ss.probes[0].p) / p_amb 
-    
-    t_iso_out = np.array(ss.probes[1].t) /tFinal
-    p_iso_out = np.array(ss.probes[1].p) /p_amb
+    t_iso_in = np.array(ss.probes[0].t) / tFinal
+    p_iso_in = np.array(ss.probes[0].p) / p_amb
 
-    t_back_p = np.array(ss.probes[2].t) /tFinal
-    p_back_p = np.array(ss.probes[2].p) /p_amb
+    t_iso_out = np.array(ss.probes[1].t) / tFinal
+    p_iso_out = np.array(ss.probes[1].p) / p_amb
 
+    t_back_p = np.array(ss.probes[2].t) / tFinal
+    p_back_p = np.array(ss.probes[2].p) / p_amb
 
     fig, ax1 = plt.subplots()
 
-    ax1.plot(t_iso_out, p_iso_out, 'r', label="$\\mathrm{Isolator\\ Outlet}$", linewidth=2.0)
-    ax1.plot(t_iso_in, p_iso_in, 'b', label="$\\mathrm{Isolator\\ Inlet}$", linewidth=2.0)
-    ax1.plot(t_back_p, p_back_p, 'g', label="$\\mathrm{Back\\ Pressure}$", linewidth=2.0)
+    ax1.plot(
+        t_iso_out, p_iso_out, "r", label="$\\mathrm{Isolator\\ Outlet}$", linewidth=2.0
+    )
+    ax1.plot(
+        t_iso_in, p_iso_in, "b", label="$\\mathrm{Isolator\\ Inlet}$", linewidth=2.0
+    )
+    ax1.plot(
+        t_back_p, p_back_p, "g", label="$\\mathrm{Back\\ Pressure}$", linewidth=2.0
+    )
     ax1.set_ylim(0, 55)
     ticks = np.arange(0, 57.5, 2.5)
     ax1.set_yticks(ticks)
     ax1.set_yticklabels([f"{t:.0f}" if t % 5 == 0 else "" for t in ticks])
     xticks = np.arange(0, max(t_iso_out), 0.1)
     ax1.set_xticks(xticks)
-    ax1.set_xticklabels([f"{x:.1f}" if round(x*10) % 5 == 0 else "" for x in xticks])
+    ax1.set_xticklabels([f"{x:.1f}" if round(x * 10) % 5 == 0 else "" for x in xticks])
 
     ax2 = ax1.twinx()
     ax2.set_ylabel("$A^*/A_{th}$")
-    ax2.set_ylim(0,4.5)
+    ax2.set_ylim(0, 4.5)
 
-    ax2.plot(t_iso_out, AR(t_AR), 'k', linewidth=2.0)
-    ticks2 = np.arange(0,4.25,0.25)
+    ax2.plot(t_iso_out, AR(t_AR), "k", linewidth=2.0)
+    ticks2 = np.arange(0, 4.25, 0.25)
     ax2.set_yticks(ticks2)
     ax2.set_yticklabels([f"{t:.1f}" if t % 1.0 == 0 else "" for t in ticks2])
 
     ax1.set_xlabel("$t\\ [\\mathrm{s}]$")
     ax1.set_ylabel("$p / p_1$")
-    ax1.legend(loc="lower left",ncol = 3, frameon=False)
-    if pseudoshock:
-        titlestr = "Pseudoshock Active"
-    else:
-        titlestr = "Pseudoshock Inactive"
+    ax1.legend(loc="lower left", ncol=3, frameon=False)
+    titlestr = "Pseudoshock Active" if pseudoshock else "Pseudoshock Inactive"
     fig.suptitle(titlestr)
-    output_dir = 'figures'
-    filename =  f"deng_unstart_{titlestr}.png"
+    filename = f"deng_unstart_{titlestr}.png"
     time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    plt.savefig(os.path.join(output_dir, f"{filename}_{time_stamp}.png"), dpi=300,bbox_inches='tight')
+    plt.savefig(
+        figdir / f"{filename}_{time_stamp}.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
     import shutil
 
     splicer(tFinal, figdir / "anim", figdir, copy_vid_path)
-    dest_path = os.path.join(copy_img_path, f"{filename}_{time_stamp}.png")
-    shutil.copyfile(os.path.join(output_dir, f"{filename}_{time_stamp}.png"), dest_path)
+    dest_path = copy_img_path / f"{filename}_{time_stamp}.png"
+    shutil.copyfile(figdir / f"{filename}_{time_stamp}.png", dest_path)
     plt.show()
-
 
     # import subprocess
 
@@ -445,5 +459,5 @@ finally:
 
     # # for file in glob.glob(os.path.join('xt_raw','*.csv')):
     #     # os.remove(file)
-    
+
     # # code.interact(local=locals())

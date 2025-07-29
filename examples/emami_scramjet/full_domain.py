@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import code
 import time
 from pathlib import Path
 
@@ -10,7 +9,7 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.thermotable import ThermoTable
-from stanshock.processing.plot import XTDiagram, SnapshotDiagram
+from stanshock.processing.plot import SnapshotDiagram, XTDiagram
 
 plt.rcParams.update(
     {
@@ -264,6 +263,7 @@ try:
     )
 
     import traceback
+
     t0 = time.perf_counter()
     plot_variables = [
         "density",
@@ -273,11 +273,11 @@ try:
         "mach",
     ]
     ss.xt_diagrams = [
-    XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+        XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
 
     ss.snapshot_diagrams = [
-    SnapshotDiagram(ss, variable, skipSteps=10) for variable in plot_variables
+        SnapshotDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
