@@ -480,7 +480,7 @@ class Combustor:
         )
 
         # Single forward-Euler step
-        y += dydt * dt
+        y[self.idx_cells] += dydt * dt
 
         # Update
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
