@@ -25,5 +25,6 @@ class RightHandSide:
         physics: FluidPhysics,
         *args,
     ) -> Array:
+        assert state.gamma is not None
         state_array = physics.primitive_to_conservative(state)
         return self.source(time, state_array, physics, state.gamma, *args)

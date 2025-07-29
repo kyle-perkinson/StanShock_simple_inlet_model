@@ -48,26 +48,33 @@ class XTDiagram:
         variable = self.name
         state = domain.state
         geometry = domain.geometry
+        idx_cells = domain.idx_cells
 
         if variable in ["density", "r", "rho"]:
-            self.variable.append(np.interp(self.x, geometry.x, state.density))
+            self.variable.append(
+                np.interp(self.x, geometry.x, state.density[idx_cells])
+            )
         elif variable in ["velocity", "u"]:
-            self.variable.append(np.interp(self.x, geometry.x, state.velocity))
+            self.variable.append(
+                np.interp(self.x, geometry.x, state.velocity[idx_cells])
+            )
         elif variable in ["pressure", "p"]:
-            self.variable.append(np.interp(self.x, geometry.x, state.pressure))
+            self.variable.append(
+                np.interp(self.x, geometry.x, state.pressure[idx_cells])
+            )
         elif variable in ["temperature", "t"]:
             T = domain.physics.get_temperature(state)
-            self.variable.append(np.interp(self.x, geometry.x, T))
+            self.variable.append(np.interp(self.x, geometry.x, T[idx_cells]))
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            self.variable.append(np.interp(self.x, geometry.x, state.gamma))
+            self.variable.append(np.interp(self.x, geometry.x, state.gamma[idx_cells]))
         elif variable in domain.physics.scalar_names:
             scalarIndex = domain.physics.scalar_names.index(variable)
             self.variable.append(
-                np.interp(self.x, geometry.x, state.composition[:, scalarIndex])
+                np.interp(self.x, geometry.x, state.composition[idx_cells, scalarIndex])
             )
         elif variable in ["mach", "m"]:
             M = np.abs(state.velocity) / domain.physics.get_sound_speed(state)
-            self.variable.append(np.interp(self.x, self.x, M))
+            self.variable.append(np.interp(self.x, self.x, M[idx_cells]))
         else:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
@@ -144,74 +151,75 @@ def plot_state(domain, filename):
     physics = domain.physics
     state = domain.state
     geometry = domain.geometry
+    idx_cells = domain.idx_cells
     T = physics.get_temperature(state)
 
-    fig, ax = plt.subplots(5, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(geometry.x * xscale, state.density)
+    fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
+    ax[0].plot(geometry.x * xscale, state.density[idx_cells])
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     if geometry.h is not None:
         add_h_plot(domain, ax[0], scale=xscale)
 
-    ax[1].plot(geometry.x * xscale, state.velocity)
+    ax[1].plot(geometry.x * xscale, state.velocity[idx_cells])
     ax[1].set_ymargin(0.1)
     ax[1].set_ylabel(r"$u$ [m/s]")
     if geometry.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
-    ax[2].plot(geometry.x * xscale, state.pressure)
+    ax[2].plot(geometry.x * xscale, state.pressure[idx_cells])
     ax[2].set_ymargin(0.1)
     ax[2].set_ylabel(r"$p$ [Pa]")
     if geometry.h is not None:
         add_h_plot(domain, ax[2], scale=xscale)
 
-    ax[3].plot(geometry.x * xscale, T)
+    ax[3].plot(geometry.x * xscale, T[idx_cells])
     ax[3].set_ymargin(0.1)
     ax[3].set_ylabel(r"$T$ [K]")
     if geometry.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
     M = np.abs(state.velocity) / physics.get_sound_speed(state)
-    ax[4].plot(geometry.x * xscale, M)
+    ax[4].plot(geometry.x * xscale, M[idx_cells])
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
     if geometry.h is not None:
         add_h_plot(domain, ax[4], scale=xscale)
 
-    # if physics.is_flamelet:
-    #     state = physics.set_state(state)
-    #     Y_H2 = physics.lookup("H2", state)
-    #     Y_OH = physics.lookup("OH", state)
-    #     Y_H2O = physics.lookup("H2O", state)
-    # else:
-    #     Y = state.mass_fractions
-    #     Y_H2 = Y[:, physics.gas.species_index("H2")]
-    #     Y_OH = Y[:, physics.gas.species_index("OH")]
-    #     Y_H2O = Y[:, physics.gas.species_index("H2O")]
-    # ax[5].plot(geometry.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
-    # ax[5].plot(geometry.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
-    # ax[5].plot(geometry.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
-    # if Y_H2.max() < 1e-6:
-    #     ax[5].set_ylim(-1e-3, 1e-3)
-    # else:
-    #     ax[5].set_ymargin(0.1)
-    # ax[5].set_ylabel(r"$Y_k$ [-]")
-    # ax[5].legend(loc="upper right")
-    # if geometry.h is not None:
-    #     add_h_plot(domain, ax[5], scale=xscale)
+    if physics.is_flamelet:
+        state = physics.set_state(state)
+        Y_H2 = physics.lookup("H2", state)[idx_cells]
+        Y_OH = physics.lookup("OH", state)[idx_cells]
+        Y_H2O = physics.lookup("H2O", state)[idx_cells]
+    else:
+        Y = state.mass_fractions[idx_cells]
+        Y_H2 = Y[:, physics.gas.species_index("H2")]
+        Y_OH = Y[:, physics.gas.species_index("OH")]
+        Y_H2O = Y[:, physics.gas.species_index("H2O")]
+    ax[5].plot(geometry.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
+    ax[5].plot(geometry.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
+    ax[5].plot(geometry.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
+    if Y_H2.max() < 1e-6:
+        ax[5].set_ylim(-1e-3, 1e-3)
+    else:
+        ax[5].set_ymargin(0.1)
+    ax[5].set_ylabel(r"$Y_k$ [-]")
+    ax[5].legend(loc="upper right")
+    if geometry.h is not None:
+        add_h_plot(domain, ax[5], scale=xscale)
 
-    # ax[6].scatter(
-    #     domain.injector.fluid_tips[:, 0] * xscale,
-    #     domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
-    #     s=1,
-    # )
-    # ax[6].set_ymargin(0.1)
-    # ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
-    # if geometry.h is not None:
-    #     add_h_plot(domain, ax[6], scale=xscale)
+    ax[6].scatter(
+        domain.injector.fluid_tips[:, 0] * xscale,
+        domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
+        s=1,
+    )
+    ax[6].set_ymargin(0.1)
+    ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
+    if geometry.h is not None:
+        add_h_plot(domain, ax[6], scale=xscale)
 
-    # ax[6].set_xlabel("x [mm]")
+    ax[6].set_xlabel("x [mm]")
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 
@@ -219,15 +227,11 @@ def plot_state(domain, filename):
     plt.savefig(filename, bbox_inches="tight", dpi=300)
     plt.close()
 
-import matplotlib.pyplot as plt
-import numpy as np
-from pathlib import Path
-
 
 class SnapshotDiagram:
     """
     This class stores and plots snapshots of a given variable over the spatial domain at selected time intervals.
-    
+
     Inputs:
         domain: simulation domain with geometry and state
         variable: string specifying the variable to plot (e.g., "pressure", "temperature")
@@ -274,7 +278,8 @@ class SnapshotDiagram:
             i = physics.scalar_names.index(variable)
             y = np.interp(x, geometry.x, state.composition[:, i])
         else:
-            raise Exception(f"Invalid Variable Name: {variable}")
+            msg: str = f"Invalid Variable Name: {variable}"
+            raise Exception(msg)
 
         self.snapshots.append((domain.t, y))
         self.counter += 1
@@ -285,7 +290,7 @@ class SnapshotDiagram:
         """
         plt.figure()
         for t, y in self.snapshots:
-            plt.plot(self.x, y, label=f"{t*1e3:.2f} ms")
+            plt.plot(self.x, y, label=f"{t * 1e3:.2f} ms")
 
         plt.xlabel("x [m]")
         var_label = {
@@ -294,7 +299,7 @@ class SnapshotDiagram:
             "density": r"$\rho$ [kg/m³]",
             "velocity": "u [m/s]",
             "gamma": r"$\gamma$",
-            "mach": "M"
+            "mach": "M",
         }.get(self.name, self.name)
         plt.ylabel(var_label)
         plt.title(f"{var_label} snapshots")
@@ -303,4 +308,3 @@ class SnapshotDiagram:
         plt.tight_layout()
         plt.savefig(Path(figdir) / f"{self.name}_snapshots.png", dpi=300)
         plt.close()
-

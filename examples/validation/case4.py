@@ -13,6 +13,7 @@ from stanshock.components.shocktube import ShockTube
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
+from stanshock.system.backend import Array
 
 
 # =============================================================================
@@ -114,31 +115,34 @@ def main(
     )
     dDInterpdxInterp = (dInterp[1:] - dInterp[:-1]) / (xInterp[1:] - xInterp[:-1])
 
-    def d_outer(x, _t):
+    def d_outer(time: float, x: Array) -> Array:
         nX = x.shape[0]
         return DDriven * np.ones(nX)
 
-    def d_inner(x, _t):
+    def d_inner(time: float, x: Array) -> Array:
         return np.interp(x, xInterp, dInterp)
 
-    def dd_outerdx(_x, _t):
+    def dd_outerdx(time: float, x: Array) -> Array:
         return np.zeros(nX)
 
-    def dd_innerdx(x, t):
+    def dd_innerdx(time: float, x: Array) -> Array:
         return np.interp(x, xInterp[:-1], dDInterpdxInterp)
 
-    def A(x, t):
-        return np.pi / 4.0 * (d_outer(x, t) ** 2.0 - d_inner(x, t) ** 2.0)
+    def A(time: float, x: Array) -> Array:
+        return np.pi / 4.0 * (d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
 
-    def dA_dx(x, t):
+    def dA_dx(time: float, x: Array) -> Array:
         return (
             np.pi
             / 2.0
-            * (d_outer(x, t) * dd_outerdx(x, t) - d_inner(x, t) * dd_innerdx(x, t))
+            * (
+                d_outer(time, x) * dd_outerdx(time, x)
+                - d_inner(time, x) * dd_innerdx(time, x)
+            )
         )
 
-    def dlnA_dx(x, t):
-        return dA_dx(x, t) / A(x, t)
+    def dlnA_dx(time: float, x: Array) -> Array:
+        return dA_dx(time, x) / A(time, x)
 
     # solve with boundary layer model
     boundary_conditions = ["reflecting", "reflecting"]
@@ -174,13 +178,14 @@ def main(
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
     dx = ssbl.geometry.x[1] - ssbl.geometry.x[0]
-    dV = A(ssbl.geometry.x, 0) * dx
+    dV = A(0.0, ssbl.geometry.x) * dx
     VDriver = np.sum(dV[ssbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
     # get gas properties
     iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
+    mt = ssbl.n_ghost_layers
     for iX, VNorm in enumerate(VNorms):
         if VNorm <= 1.0:
             # nitrogen and helium
@@ -189,9 +194,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssbl.state.density[iX] = gas4.density
-            ssbl.state.composition[iX, :] = gas4.Y
-            ssbl.state.gamma[iX] = gas4.cp / gas4.cv
+            ssbl.state.density[iX + mt] = gas4.density
+            ssbl.state.composition[iX + mt, :] = gas4.Y
+            ssbl.state.gamma[iX + mt] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
@@ -231,13 +236,14 @@ def main(
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
     dx = ssnbl.geometry.x[1] - ssnbl.geometry.x[0]
-    dV = A(ssnbl.geometry.x, 0) * dx
+    dV = A(0.0, ssnbl.geometry.x) * dx
     VDriver = np.sum(dV[ssnbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
     # get gas properties
     iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
+    mt = ssnbl.n_ghost_layers
     for iX, VNorm in enumerate(VNorms):
         if VNorm <= 1.0:
             # nitrogen and helium
@@ -246,9 +252,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssnbl.state.density[iX] = gas4.density
-            ssnbl.state.composition[iX, :] = gas4.Y
-            ssnbl.state.gamma[iX] = gas4.cp / gas4.cv
+            ssnbl.state.density[iX + mt] = gas4.density
+            ssnbl.state.composition[iX + mt, :] = gas4.Y
+            ssnbl.state.gamma[iX + mt] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()

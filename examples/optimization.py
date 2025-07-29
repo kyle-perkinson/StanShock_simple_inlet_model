@@ -17,6 +17,7 @@ from stanshock.processing.initialize import (
 )
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
+from stanshock.system.backend import Array
 
 
 def main(
@@ -50,26 +51,33 @@ def main(
     Delta = 10 * (xUpper - xLower) / float(nXFine)
     x = np.linspace(xLower, xUpper, nXCoarse)
 
-    def d_inner(x, _t):
+    def d_inner(time: float, x: Array) -> Array:
         return np.zeros_like(x)
 
-    def dd_inner_dx(x, _t):
+    def dd_inner_dx(time: float, x: Array) -> Array:
         return np.zeros_like(x)
 
-    def d_outer(x, _t):
+    def d_outer(time: float, x: Array) -> Array:
         return smoothing_function(x, xShock, Delta, DDriver, DDriven)
 
-    def dd_outer_dx(x, _t):
+    def dd_outer_dx(time: float, x: Array) -> Array:
         return smoothing_function_gradient(x, xShock, Delta, DDriver, DDriven)
 
-    def A(x, t):
-        return np.pi / 4.0 * (d_outer(x, t) ** 2.0 - d_inner(x, t) ** 2.0)
+    def A(time: float, x: Array) -> Array:
+        return np.pi / 4.0 * (d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
 
-    def dA_dx(x, t):
-        return np.pi / 2.0 * (d_outer(x, t) * dd_outer_dx(x, t) - d_inner(x, t) * dd_inner_dx(x, t))
+    def dA_dx(time: float, x: Array) -> Array:
+        return (
+            0.5
+            * np.pi
+            * (
+                d_outer(time, x) * dd_outer_dx(time, x)
+                - d_inner(time, x) * dd_inner_dx(time, x)
+            )
+        )
 
-    def dlnA_dx(x, t):
-        return dA_dx(x, t) / A(x, t)
+    def dlnA_dx(time: float, x: Array) -> Array:
+        return dA_dx(time, x) / A(time, x)
 
     # compute the gas dynamics
     def res(Ms1):
@@ -170,8 +178,8 @@ def main(
         diagram.plot()
 
     xInsert = ss.geometry.x
-    d_outer_insert = ss.geometry.d_outer(ss.geometry.x, 0)
-    d_inner_insert = ss.geometry.d_inner(ss.geometry.x, 0)
+    d_outer_insert = ss.geometry.d_outer(0.0, ss.geometry.x)
+    d_inner_insert = ss.geometry.d_inner(0.0, ss.geometry.x)
 
     # recalculate at higher resolution without the insert
     gas1.TPX = T1, p1, "AR:1"
