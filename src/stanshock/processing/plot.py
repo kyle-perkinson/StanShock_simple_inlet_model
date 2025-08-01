@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -80,6 +81,29 @@ class XTDiagram:
             raise Exception(msg)
         self.t.append(domain.t)
 
+    def save_to_csv(self, output_dir="xt_output"):
+        """
+        Save the variable data to a timestamped CSV file.
+        Each row is one time snapshot, with the first column being time (ms) and
+        the rest being the values at each x location.
+        """
+        if not Path.exists():
+            Path.mkdir(parents=True)
+        filename = f"{self.name}.csv"
+        filepath = Path(output_dir / filename)
+
+        # First row is the header: Time, x0, x1, ..., xN
+        header = [0] + [f"{xi:.6f}" for xi in self.x]
+
+        with Path.open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for t_val, profile in zip(self.t, self.variable, strict=False):
+                row = [f"{t_val * 1e3:.6f}"] + [f"{v:.6e}" for v in profile]
+                writer.writerow(row)
+
+        print(f"Saved {self.name} data to: {filepath}")
+
     def plot(self, figdir="."):
         """
         This method creates a contour plot of the XTDiagram data
@@ -146,7 +170,65 @@ def add_h_plot(domain, ax, scale=1.0):
     return ax1
 
 
-def plot_state(domain, filename):
+def get_state_plot_bounds(domain):
+    rlims = [0, 0]
+    ulims = [0, 0]
+    plims = [0, 0]
+    Tlims = [0, 0]
+    Mlims = [0, 0]
+
+    g = 1.4
+
+    for ibc in [0, 1]:
+        if type(domain.boundary_conditions[ibc]) is not str:
+            if domain.boundary_conditions[ibc][0] is not None:
+                rlims[ibc] = domain.boundary_conditions[ibc][0]
+            if domain.boundary_conditions[ibc][1] is not None:
+                ulims[ibc] = domain.boundary_conditions[ibc][1]
+            if domain.boundary_conditions[ibc][2] is not None:
+                plims[ibc] = domain.boundary_conditions[ibc][2]
+
+    p1 = plims[0]
+    r1 = rlims[0]
+
+    rlims = np.max(rlims)
+    ulims = np.max(ulims)
+    plims = np.max(plims)
+
+    a = domain.physics.get_sound_speed(domain.state)
+    T = domain.physics.get_temperature(domain.state)
+    T1 = T[0]
+    cp = domain.physics.get_cp(domain.state)
+    cp_max = max([cp[0], cp[-1]])
+
+    a_arr = [a[0], a[-1]]
+    Mlims = np.max(ulims / a_arr)
+
+    p_rat = 1 + ((2 * g) / (g + 1)) * Mlims**2 - 1
+    r_rat = (1 + ((g + 1) / (g - 1)) * p_rat) / (((g + 1) / (g - 1)) + p_rat)
+    T_rat = p_rat / r_rat
+
+    u2 = np.sqrt(2 * cp_max * T1 * T_rat)
+    k = 2.0
+    rlims = [0, r_rat * k]
+    ulims = [0, np.ceil(u2)]
+    plims = [0, np.ceil(p_rat)]
+    Tlims = [0, np.ceil(T_rat)]
+    Mlims = [0, 5]
+    return T1, p1, r1, Mlims, plims, Tlims, ulims, rlims
+
+
+def plot_state(domain, filename, limits):
+    T1, p1, r1, Mlims, plims, Tlims, ulims, rlims = (
+        limits[0],
+        limits[1],
+        limits[2],
+        limits[3],
+        limits[4],
+        limits[5],
+        limits[6],
+        limits[7],
+    )
     xscale = 1.0e3
     physics = domain.physics
     state = domain.state
@@ -154,22 +236,46 @@ def plot_state(domain, filename):
     idx_cells = domain.idx_cells
     T = physics.get_temperature(state)
 
+    subtitle_str = []
+    if plims != [0, 0]:
+        subtitle_str.append(f"$P_1 = {p1:.0f}$ Pa")
+    if Tlims != [0, 0]:
+        subtitle_str.append(f"$T_1 = {T1:.0f}$ K")
+    if rlims != [0, 0]:
+        subtitle_str.append(f"$\\rho_1 = {r1:.2f}$ [kg/m$^3$]")
+    subtitle = ", ".join(subtitle_str)
+
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
     ax[0].plot(geometry.x * xscale, state.density[idx_cells])
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     if geometry.h is not None:
         add_h_plot(domain, ax[0], scale=xscale)
+    if rlims == [0, 0]:
+        ax[0].set_ylim([0, 5])
+    else:
+        ax[0].set_ylim(rlims)
 
     ax[1].plot(geometry.x * xscale, state.velocity[idx_cells])
     ax[1].set_ymargin(0.1)
+    if ulims == [0, 0]:
+        ax[1].set_ylim([0, 800])
+    else:
+        ax[1].set_ylim(ulims)
+    ax[1].set_xlabel("x [cm]")
     ax[1].set_ylabel(r"$u$ [m/s]")
     if geometry.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
-    ax[2].plot(geometry.x * xscale, state.pressure[idx_cells])
     ax[2].set_ymargin(0.1)
-    ax[2].set_ylabel(r"$p$ [Pa]")
+    if plims == [0, 0]:
+        ax[2].plot(geometry.x * xscale, state.pressure[idx_cells])
+        ax[2].set_ylim([0, 250000])
+        ax[2].set_ylabel(r"$P$ [Pa]")
+    else:
+        ax[2].plot(geometry.x * xscale, state.pressure[idx_cells] / p1)
+        ax[2].set_ylim(plims)
+        ax[2].set_ylabel(r"$p / p_1$")
     if geometry.h is not None:
         add_h_plot(domain, ax[2], scale=xscale)
 
@@ -184,6 +290,10 @@ def plot_state(domain, filename):
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
+    if Mlims == [0, 0]:
+        ax[4].set_ylim([0, 5])
+    else:
+        ax[4].set_ylim(Mlims)
     if geometry.h is not None:
         add_h_plot(domain, ax[4], scale=xscale)
 
@@ -220,8 +330,10 @@ def plot_state(domain, filename):
         add_h_plot(domain, ax[6], scale=xscale)
 
     ax[6].set_xlabel("x [mm]")
-
-    fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
+    full_title = (
+        r"$t = %.4f$ ms" % (domain.t * 1e3) + "\n" + r"\footnotesize{" + subtitle + "}"
+    )
+    fig.suptitle(full_title)
 
     plt.tight_layout()
     plt.savefig(filename, bbox_inches="tight", dpi=300)

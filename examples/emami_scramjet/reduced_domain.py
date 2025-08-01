@@ -52,14 +52,12 @@ animdir.mkdir(exist_ok=True)
 resultsdir = Path("./xt_raw")
 resultsdir.mkdir(exist_ok=True)
 
-windows_dir: Path = Path(
-    "/mnt/c/Users/nlain/OneDrive - Stanford/MAIN WORK/01_Research/06_Plots/00_Current_Deng_Runs"
+copy_dir: Path = Path(
+    "/Users/nlaing3/Library/CloudStorage/OneDrive-Stanford/MAIN WORK/01_Research/06_Plots/00_StanShock"
 )
-copy_vid_path: Path = windows_dir / "01_movies"
-copy_img_path: Path = windows_dir / "00_plots"
-# splicer(tFinal, figdir / "anim", figdir, copy_vid_path)
+copy_vid_path: Path = copy_dir / "01_movies"
+copy_img_path: Path = copy_dir / "00_plots"
 
-# Delete .png and .mp4 in 'figures/' and 'figures/anim/'
 for ext in ("*.png", "*.mp4"):
     for file in figdir.glob(pattern=ext):
         file.unlink(missing_ok=True)
@@ -70,10 +68,10 @@ for ext in ("*.png", "*.mp4"):
 # TESTING
 closing = True
 AR_i = 4.15
-pseudoshock = False
-desired_img_count = 400
-t_sim = 0.008
-N_x = 1500
+pseudoshock = True
+desired_img_count = 200
+t_sim = 0.025
+N_x = 300
 """
 SIMULATION TIME PARAMETERS
 """
@@ -84,7 +82,7 @@ tFinal = t_sim + t_stab
 
 AR_f: float = AR_i if not closing else 1
 
-dt_estimate = 1e-6
+dt_estimate = 7e-7
 
 
 plot_interval = int(
@@ -96,7 +94,6 @@ plot_interval = int(
 mech = "data/mechanisms/N2O2HeAr.yaml"
 X_amb = "O2:0.21 N2:0.79"
 gas = ct.Solution(mech)
-
 """
 GEOMETRY INPUTS
     from ("Experimental Investigation of Inlet-Combustor Isolators for a Dual-Mode Scramjet...")
@@ -137,42 +134,41 @@ x_cle = L_rp - L_cowl * np.cos(theta_cowl)
 y_cle = (H_th + H_rp) - h_cowl
 
 # Upper Wall (cowl and after)
-xu1 = x_cle
-xu2 = L_rp
-xu3 = xu2 + L_iso + L_fd
-xu4 = xu3 + L_du
-xu5 = xu4 + L_cu
-xu6 = xu5 + L_nu
-xu7 = xu6 + L_fu
-x_u = np.array([xu1, xu2, xu3, xu4, xu5, xu6, xu7]) - xu1
+xu1 = 0
+xu2 = xu1 + L_iso + L_fd
+xu3 = xu2 + L_du
+xu4 = xu3 + L_cu
+xu5 = xu4 + L_nu
+xu6 = xu5 + L_fu
+x_u = np.array([xu1, xu2, xu3, xu4, xu5, xu6]) - xu1
+
 L_tot = x_u[-1] - x_u[0]
-yu1 = y_cle
-yu2 = H_rp + H_th
-yu3 = yu2
+
+yu1 = H_rp + H_th
+yu2 = yu1
+yu3 = H_cc
 yu4 = H_cc
-yu5 = H_cc
-yu6 = H_cc - H_noz
-yu7 = yu6
-y_u = np.array([yu1, yu2, yu3, yu4, yu5, yu6, yu7])
+yu5 = H_cc - H_noz
+yu6 = yu5
+y_u = np.array([yu1, yu2, yu3, yu4, yu5, yu6])
+
 
 # Lower Wall is time dependent-- see H(x,t)
-xd1 = x_cle
-xd2 = L_rp
-xd3 = xd2 + L_iso
-xd4 = xd3 + L_dd
-xd5 = xd4 + L_cd
-x_d_incomp = np.array([xd1, xd2, xd3, xd4, xd5]) - xd1
+xd1 = 0
+xd2 = L_iso
+xd3 = xd2 + L_dd
+xd4 = xd3 + L_cd
+x_d_incomp = np.array([xd1, xd2, xd3, xd4]) - xd1
 
-yd1 = xd1 * (H_rp / L_rp)
+yd1 = H_rp
 yd2 = H_rp
-yd3 = H_rp
+yd3 = 0
 yd4 = 0
-yd5 = 0
-y_d_incomp = np.array([yd1, yd2, yd3, yd4, yd5])
+y_d_incomp = np.array([yd1, yd2, yd3, yd4])
 
 W = 0.0508  # Constant Scramjet Width (m)
 
-regions = {"isolator": (x_u[0], x_u[6])}
+regions = {"isolator": (x_u[0], x_u[5])}
 
 """
 FLOW PROPERTIES
@@ -184,9 +180,9 @@ M_amb = 4.03  # freestream inlet Mach number (w/o ramp/cowl = 2.1993)
 T_amb = 70.618476  # freestream inlet static temp, K (w/o ramp/cowl = 152.48)
 p_amb = 8278.763  # freestream inlet static pressure, Pa (w/o ramp/cowl = 81741.125)
 
-M1 = 3.133
-p1 = 24936.0
-T1 = 101.83225
+M1 = 2.05
+p1 = 85515.38
+T1 = 182.74
 
 
 gas1.TPX = T1, p1, X_amb  # isolator inlet solution/flow initialization
@@ -204,7 +200,7 @@ physics_model = ThermoTable(gas1)
 BOUNDARY CONDITIONS
 """
 BC_inlet = gas1.density, u1, gas1.P, None
-BC_outlet = None, None, p2, None
+BC_outlet = "outflow"
 
 BCs = (BC_inlet, BC_outlet)
 
@@ -326,10 +322,10 @@ def dlnAdt(t, x):
 
 
 # Define the grid
-xShock = x_u[5]
+xShock = x_u[1]
 x = np.linspace(x_u[0], x_u[-1], N_x)
 
-# grid_gen(x,0)
+# grid_gen(0,x)
 
 try:
     ss = Combustor(
@@ -347,19 +343,19 @@ try:
         initialization=("riemann", state1, state2, xShock),
         boundary_conditions=BCs,
         physics=physics_model,
-        cfl=0.5,
+        cfl=1.0,
         include_diffusion=True,
         output_every=plot_interval,
         plot_state_interval=plot_interval,
     )
-    ss.probes.append(Probe(ss, x_d_incomp[1], skipSteps=10, probeName="isolator_inlet"))
+    ss.probes.append(Probe(ss, 0.01, skipSteps=10, probeName="isolator_inlet"))
     ss.probes.append(
-        Probe(ss, x_d_incomp[2], skipSteps=10, probeName="isolator_outlet")
+        Probe(ss, x_d_incomp[1], skipSteps=10, probeName="isolator_outlet")
     )
     ss.probes.append(
         Probe(
             ss,
-            ((x_d_incomp[3] + x_d_incomp[4]) / 2),
+            ((x_d_incomp[2] + x_d_incomp[3]) / 2),
             skipSteps=10,
             probeName="backpressure",
         )
@@ -388,6 +384,22 @@ finally:
         diagram.plot(figdir=figdir)
         diagram.save_to_csv(output_dir=resultsdir)
 
+        plt.figure(figsize=(4, 4))
+        plt.plot(ss.pseudoshock.x_pred, ss.pseudoshock.t_us, c="r", label="Predicted")
+        plt.plot(
+            x[ss.pseudoshock.sf_array],
+            ss.pseudoshock.time_array,
+            c="b",
+            label="Selected",
+        )
+        plt.ylabel("Time [s]")
+        plt.xlabel(r"$x_s$ [m]")
+        plt.xlim([x[0], x[-1]])
+        plt.ylim([0, max(ss.pseudoshock.t_us)])
+        plt.legend(loc="best")
+        plt.grid(True)
+        plt.savefig(figdir / "shock_location.png", dpi=300, bbox_inches="tight")
+        # plt.show()
     plt.figure(figsize=(4, 4))
 
     # Extract time and pressure data from probes, normalize by static pressure (originally at ramp inlet, but also as back pressure)
@@ -447,17 +459,3 @@ finally:
     dest_path = copy_img_path / f"{filename}_{time_stamp}.png"
     shutil.copyfile(figdir / f"{filename}_{time_stamp}.png", dest_path)
     plt.show()
-
-    # import subprocess
-
-    # splicer_path = os.path.join('figures', 'anim', 'splicer.py')
-    # movie_path = os.path.join('examples','emami_movie_maker.py')
-    # subprocess.run(['python3', splicer_path], check=True)
-    # subprocess.run(['python3', movie_path], check=True)
-
-    # # Delete all .png files in figures/anim and all csv files in raw data
-
-    # # for file in glob.glob(os.path.join('xt_raw','*.csv')):
-    #     # os.remove(file)
-
-    # # code.interact(local=locals())
