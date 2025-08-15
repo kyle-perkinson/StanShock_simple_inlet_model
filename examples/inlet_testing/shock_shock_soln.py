@@ -1,35 +1,12 @@
-import cantera as ct
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import utils.comp_flow_fxns as cff
+import src.moc_inlet.utils.comp_flow_fxns as cff
 from scipy.optimize import root_scalar
+from src.moc_inlet.utils.flowstate import FlowState
 
-class FlowState:
-    def __init__(self, composition: str = "air"):
-        if composition == "air":
-            mech = "../Stanshock/data/mechanisms/N2O2HeAr.yaml"
-            X = "O2:0.21 N2:0.79"
-        else:
-            mech = composition
-            X = composition
-        self.gas = ct.Solution(mech)
-        self.X = X
-        self.k = None
-        self.M = None
-        self.theta = None
-        self.P = None
-        self.T = None
-        self.rho = None
-
-    def set_state(self, T: float, P: float, M: float, theta: float):
-        self.gas.TPX = T, P, self.X
-        self.k = self.gas.cp_mass / self.gas.cv_mass
-        self.M = M
-        self.theta = theta
-        self.P = P
-        self.T = T
-        self.rho = self.gas.density
+"""
+This is a very crude 2-D Riemann problem; has yet to be implemented into the src.moc_inlet.utils
+Goal here is just to figure out correct way to obtain theta/p function and find slipstream states
+"""
 
 
 def feature_calc(inflow, theta_guess):
@@ -59,12 +36,6 @@ def riemann_problem2d(upper_state, lower_state):
     outflow_lower = feature_calc(lower_state, theta_slipline)
     return outflow_upper, outflow_lower
     
-
-
-
-        
-    
-
 
 delta_u = np.radians(-15)
 delta_d = np.radians(10)

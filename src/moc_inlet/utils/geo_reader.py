@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-
 def geo_reader(filepath):
     walls = pd.read_csv(filepath)
     x1 = np.array(walls["x1"].values)

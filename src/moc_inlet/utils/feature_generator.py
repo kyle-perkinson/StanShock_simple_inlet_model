@@ -1,7 +1,8 @@
 import numpy as np
-from utils.flowstate import FlowState
-import utils.comp_flow_fxns as cff
-from utils.feature import Feature
+import moc_inlet.utils.comp_flow_fxns as cff
+
+from moc_inlet.utils.flowstate import FlowState
+from moc_inlet.utils.feature import Feature
 
 def feature_generator(pre_state: FlowState,
                        theta_new: float,

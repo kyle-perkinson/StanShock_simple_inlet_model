@@ -1,10 +1,9 @@
 import cantera as ct
-import utils.comp_flow_fxns as cff
 
 class FlowState:
     def __init__(self, composition: str = "air"):
         if composition == "air":
-            self.mech = "../Stanshock/data/mechanisms/N2O2HeAr.yaml"
+            self.mech = "data/mechanisms/N2O2HeAr.yaml"
             self.X = "O2:0.21 N2:0.79"
         else:
             self.mech = composition

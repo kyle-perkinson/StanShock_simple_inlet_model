@@ -1,6 +1,7 @@
 import numpy as np
-from flowstate import FlowState
-import comp_flow_fxns as cff
+import moc_inlet.utils.comp_flow_fxns as cff
+
+from moc_inlet.utils.flowstate import FlowState
 
 class Feature:
     """
