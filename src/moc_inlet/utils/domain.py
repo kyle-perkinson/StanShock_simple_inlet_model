@@ -67,7 +67,7 @@ class SolutionSlice:
 
 def build_regions(seglist: SegmentList, x_i: float, geom: Geometry) -> SolutionSlice:
     segs = list(seglist)
-    seg_positions = [(seg, float(y_at(seg, x_i))) for seg in segs]
+    seg_positions = [(seg, seg.y_at(x_i)) for seg in segs]
 
     tol = 1e-12  # tolerance for clustering same y
     # sort primarily by y (rounded), secondarily by slope (angle)
@@ -88,9 +88,9 @@ def build_regions(seglist: SegmentList, x_i: float, geom: Geometry) -> SolutionS
         above_high, below_high = states_above_below(seg_high)
 
         if isinstance(seg_low, Farfield) and seg_low is geom.lower_bbox:
-            fs = above_high
+            fs = seg_low.state
         elif isinstance(seg_high, Farfield) and seg_high is geom.upper_bbox:
-            fs = below_low
+            fs = seg_high.state
         else:
             # regular resolution
             if above_low is not None:
@@ -123,6 +123,8 @@ def states_above_below(segment: Segment):
             return segment.pre_state, segment.post_state
         else:
             return segment.post_state, segment.pre_state
+    # if isinstance(segment, (Farfield)):
+    #     return segment.state
     elif isinstance(segment, (WallSegment, Farfield)):
         return None, None
     
@@ -131,18 +133,8 @@ def y_at(segment, x_i):
 
 
 def get_inflow(x_next: float, inflection, solution_slice: SolutionSlice):
-    """
-    Given an inflection point and a SolutionSlice at the same x,
-    return the assigned FlowState at that point.
-    
-    Parameters:
-    - x_next: float, the x-coordinate where inflow is being evaluated
-    - inflection: object with attributes x_start, y_start, sigma, wall_id
-    - solution_slice: SolutionSlice at x_start
-    
-    Returns:
-    - FlowState assigned to the region containing the inflection
-    """
+    #used for incident waves to determine appropriate state. 
+    # #not used for wall/wave or wave/wave interactions!
     y_inflect = inflection.y
 
     for region in solution_slice:

@@ -2,19 +2,8 @@ import numpy as np
 import moc_inlet.utils.comp_flow_fxns as cff
 from moc_inlet.utils.flowstate import FlowState
 from moc_inlet.utils.geometry import Geometry, Inflections
-from moc_inlet.utils.domain import Domain, Region, SolutionSlice
 from moc_inlet.utils.segment import Wave, WallSegment, Slipstream
 
-
-"""
-# def ReflectedWave(x_i: float, interaction: tuple, current: SegmentList):
-#     Handle reflection of a wave from a wall.
-#     pass
-
-# def RiemannProblem(x_i: float, interaction: tuple, current: SegmentList):
-#     Solve Riemann problem for interacting waves
-#     pass
-""" 
 def reflected_wave(x_next: float, wave: Wave, wall: WallSegment):
     inflow = wave.post_state
     proj, normal, delta = get_proj(inflow.theta, wall.sigma, wall.normal)
@@ -35,6 +24,10 @@ def incident_wave(x_next: float, event: Inflections, inflow: FlowState, N_wave: 
         return [generate_oblique_shock(inflow, delta, float(event.x), float(event.y), float(event.sigma), normal)]
     elif proj > 0:
         return generate_pm_fan(inflow, delta, float(event.x), float(event.y), float(event.sigma), normal, N_wave)
+
+def riemann_problem(x_next: float, wave1: Wave, wave2: Wave):
+    pass
+
 
 
 def generate_oblique_shock(inflow: FlowState, delta, x_start: float, y_start: float, event_angle: float, event_normal):

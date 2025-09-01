@@ -2,6 +2,7 @@ import numpy as np
 from moc_inlet.utils.segment import WallSegment, Farfield
 from moc_inlet.utils.compute_normals import compute_normals
 import matplotlib.pyplot as plt
+
 def plot_normals(points, normals, scale=0.05):
     pts = np.asarray(points)
     mids = 0.5 * (pts[:-1] + pts[1:])  # segment midpoints
@@ -14,40 +15,11 @@ def plot_normals(points, normals, scale=0.05):
     plt.axis('equal')
     plt.show()
 
-# def compute_normals(points):
-#     """
-#     Compute outward normals for a closed polygon defined by `points`.
-#     Returns one unit normal per *segment* (len(points)-1).
-#     """
-#     pts = np.asarray(points, dtype=float)
-#     if not np.allclose(pts[0], pts[-1]):
-#         pts = np.vstack([pts, pts[0]])  # close loop
-
-#     tangents = np.diff(pts, axis=0)
-#     left = np.column_stack((-tangents[:, 1], tangents[:, 0]))
-#     right = -left
-
-#     # Signed area: >0 => CCW, <0 => CW
-#     area = 0.5 * np.sum(pts[:-1, 0]*pts[1:, 1] - pts[1:, 0]*pts[:-1, 1])
-#     normals = right if area > 0 else left
-
-    
-
-
-#     normals /= np.linalg.norm(normals, axis=1)[:, None]
-#     plot_normals(pts, normals)
-#     return normals  # length = len(pts)-1
-
-
-
-
 class Wall:
-    def __init__(self, points, wall_id, normals=None):
+    def __init__(self, points, wall_id):
         self.points = np.asarray(points, dtype=np.float64)
         self.wall_id = wall_id
-        self.normals = normals
-        self.points = self.points[np.argsort(self.points[:, 0])]
-        self._segments = self._create_segments()
+        self.segments = []
 
     @property
     def x(self): return self.points[:, 0]
@@ -58,33 +30,8 @@ class Wall:
     def __getitem__(self, idx): return self.points[idx]
     def __iter__(self): return iter(self.points)
     
-    def y_at(self, x):
-        if x < self.x[0] or x > self.x[-1]:
-            return None
-        return np.interp(x, self.x, self.y)
-
-    def sigma_at(self, x):
-        if x < self.x[0] or x > self.x[-1]:
-            return None
-        idx = np.searchsorted(self.x, x) - 1
-        if idx < 0:
-            idx = 0
-        if idx >= len(self.x) - 1:
-            idx = len(self.x) - 2
-        dy = self.y[idx + 1] - self.y[idx]
-        dx = self.x[idx + 1] - self.x[idx]
-        sigma = np.arctan2(dy, dx) if dx != 0 else (np.pi/2 if dy >= 0 else -np.pi/2)
-        return sigma
-    
-    def _create_segments(self):
-        segments = []
-        for i in range(len(self.points) - 1):
-            x_start, y_start = self.points[i]
-            x_end, y_end = self.points[i + 1]
-            sigma = np.arctan2(y_end - y_start, x_end - x_start)
-            normal = self.normals[i]
-            segments.append(WallSegment(x_start, y_start, x_end, y_end, sigma, normal, self.wall_id))
-        return segments
+    def assign_segments(self, segments):
+        self.segments.extend(segments)
 
 class Inflections:
     """Container for all wall inflections (vectorized, sliceable)."""
@@ -110,52 +57,128 @@ class Inflections:
             return Inflections(x, y, sigma, wall.tolist(), body.tolist(), normal.tolist())
 
 class Body:
-    def __init__(self, wall1_points, wall2_points, body_id):
+    def __init__(self, body_points, body_id):
         self.body_id = body_id
-
-        # Build closed polygon (wall1 forward, wall2 reversed)
-        body_poly = np.vstack([wall1_points, wall2_points])
-        if not np.allclose(body_poly[0], body_poly[-1]):
-            body_poly = np.vstack([body_poly, body_poly[0]])
-
-        # Compute outward normals for the polygon
-        body_normals = compute_normals(body_poly)
-
-        # Slice normals back to wall segments
+        body_normals, body_points = compute_normals(body_points)
+        wall1_points, wall2_points = self._truncate_at_turnback(body_points)
+        # plt.figure()
+        # plt.plot(wall1_points[:,0], wall1_points[:,1],'k')
+        # plt.plot(wall2_points[:,0], wall2_points[:,1],'r')
+        # plt.show()
         n1 = len(wall1_points) - 1
         n2 = len(wall2_points) - 1
         wall1_normals = body_normals[:n1]
         wall2_normals = body_normals[n1:n1+n2]
 
-        self.wall1 = Wall(wall1_points, "wall1", wall1_normals)
-        self.wall2 = Wall(wall2_points, "wall2", wall2_normals)
-        self.inflections = self._find_inflections()
+        self.wall1 = Wall(wall1_points, "wall1")
+        self.wall2 = Wall(wall2_points, "wall2")
+        segs1 = self.generate_wall_segments(self.wall1, wall1_normals)
+        segs2 = self.generate_wall_segments(self.wall2, wall2_normals)
+        self.wall1.assign_segments(segs1)
+        self.wall2.assign_segments(segs2)
 
-    def _find_inflections(self):
-        xs, ys, slopes, walls, bodies, normals = [], [], [], [], [], []
-        for wall in [self.wall1, self.wall2]:
-            dx = np.diff(wall.x); dy = np.diff(wall.y)
-            slopes_local = dy / dx
-            change_idx = np.where(np.diff(slopes_local) != 0)[0]
-            infl_idx = np.unique(np.concatenate(([0], change_idx + 1)))
-            for idx in infl_idx:
-                if idx < len(wall) - 1:
-                    slope = (wall.y[idx+1] - wall.y[idx]) / (wall.x[idx+1] - wall.x[idx])
-                else:
-                    slope = slopes_local[-1] if len(slopes_local) > 0 else 0
-                xs.append(wall.x[idx]); ys.append(wall.y[idx])
-                slopes.append(slope)
-                walls.append(wall.wall_id); bodies.append(self.body_id)
-                # pick nearest segment normal
-                normals.append(wall.normals[min(idx, len(wall.normals)-1)])
-        return Inflections(xs, ys, np.arctan(slopes), walls, bodies, normals)
+        inf1 = self.get_inflections(self.wall1)
+        inf2 = self.get_inflections(self.wall2)
+
+        self.inflections = self._combine_inflections(inf1, inf2)
+
+    def generate_wall_segments(self, wall: Wall, normals):
+        """
+        Generate WallSegment objects for a given wall.
+        Guarantees: x_start <= x_end for every segment.
+        sigma is computed for the directed segment from x_start -> x_end.
+        normals must be length = len(wall.points) - 1 and are kept as given.
+        """
+        pts = np.asarray(wall.points, dtype=float)
+        normals = np.asarray(normals, dtype=float)
+
+        if pts.shape[0] < 2:
+            return []
+
+        if normals.shape[0] != pts.shape[0] - 1:
+            raise ValueError(
+                f"normals must have length N-1 for N points; "
+                f"got {normals.shape[0]} normals and {pts.shape[0]} points"
+            )
+
+        segments = []
+        for i in range(len(pts) - 1):
+            x0, y0 = pts[i]
+            x1, y1 = pts[i + 1]
+            dx = x1 - x0
+            dy = y1 - y0
+
+            # Ensure x_start <= x_end (if equal, order by y)
+            if (dx < 0) or (np.isclose(dx, 0.0) and (y1 < y0)):
+                xs, ys = x1, y1
+                xe, ye = x0, y0
+                dx = -dx
+                dy = -dy
+            else:
+                xs, ys = x0, y0
+                xe, ye = x1, y1
+
+            # Compute sigma for oriented (xs,ys)->(xe,ye)
+            if np.isclose(dx, 0.0):
+                sigma = np.pi / 2 if dy >= 0 else -np.pi / 2
+            else:
+                sigma = np.arctan2(dy, dx)
+
+            seg = WallSegment(xs, ys, xe, ye, sigma, normals[i], wall.wall_id)
+            segments.append(seg)
+
+        # Sort by x_start, y_start for deterministic ordering
+        segments.sort(key=lambda s: (s.x_start, s.y_start))
+        return segments
     
 
+    def get_inflections(self, wall: Wall):
+        xs, ys, sigmas, walls, bodies, normals = [], [], [], [], [], []
+        segments = wall.segments
+        first_seg = segments[0]
+        xs.append(first_seg.x_start)
+        ys.append(first_seg.y_start)
+        sigmas.append(first_seg.sigma)
+        walls.append(wall.wall_id)
+        bodies.append(self.body_id)
+        normals.append(first_seg.normal)
+
+        for i in range(1, len(segments)):
+            prev_sigma = segments[i-1].sigma
+            curr_seg = segments[i]
+            if not np.isclose(curr_seg.sigma, prev_sigma):
+                xs.append(curr_seg.x_start)
+                ys.append(curr_seg.y_start)
+                sigmas.append(curr_seg.sigma)
+                walls.append(wall.wall_id)
+                bodies.append(self.body_id)
+                normals.append(curr_seg.normal)
+
+        return Inflections(xs, ys, sigmas, walls, bodies, normals)
+
+
+    def _truncate_at_turnback(self, points):
+        dx = np.diff(points[:, 0])
+        turn_idx = np.where(dx <= 0)[0]
+        if len(turn_idx) > 0:
+            turnback_idx = turn_idx[0] + 1
+            wall1 = points[:turnback_idx]  
+            wall2 = points[turnback_idx:]  
+            return wall1, wall2
+        return points, np.empty((0, 2))  # no turnback, return original wall and empty wall
+    
+    def _combine_inflections(self, inf1, inf2):
+        return Inflections(
+            np.concatenate([inf1.x, inf2.x]),
+            np.concatenate([inf1.y, inf2.y]),
+            np.concatenate([inf1.sigma, inf2.sigma]),
+            np.concatenate([inf1.wall, inf2.wall]),
+            np.concatenate([inf1.body, inf2.body]),
+            np.concatenate([inf1.normals, inf2.normals])
+        )
+    
 class Geometry:
     def __init__(self, body1, body2):
-        body1 = self._ensure_closed_polygon(body1)
-        body2 = self._ensure_closed_polygon(body2)  
-
         min_x_idx1 = np.argmin(body1[:, 0])
         min_x_idx2 = np.argmin(body2[:, 0])
         min_x1, min_y1 = body1[min_x_idx1]
@@ -169,31 +192,14 @@ class Geometry:
         body1 -= [origin_x, origin_y]
         body2 -= [origin_x, origin_y]
 
-        wall1a, wall2a = self._truncate_at_turnback(body1)
-        wall1b, wall2b = self._truncate_at_turnback(body2)
-
-        self.body1 = Body(wall1a, wall2a, "body1")
-        self.body2 = Body(wall1b, wall2b, "body2")
+        self.body1 = Body(body1, "body1")
+        self.body2 = Body(body2, "body2")
         self.lower_bbox, self.upper_bbox = self.build_bounding_box()
         self.x0 = self.upper_bbox.x_start
         self.x_end = self.upper_bbox.x_end
         self.inflections = self._combine_inflections()
 
-    def _ensure_closed_polygon(self, body):
-        body = np.asarray(body, float)
-        if not np.allclose(body[0], body[-1]):
-            return np.vstack([body, body[0]])
-        return body
 
-    def _truncate_at_turnback(self, wall):
-        dx = np.diff(wall[:, 0])
-        turn_idx = np.where(dx <= 0)[0]
-        if len(turn_idx) > 0:
-            turnback_idx = turn_idx[0] + 1
-            wall1 = wall[:turnback_idx]  
-            wall2 = wall[turnback_idx:]  
-            return wall1, wall2
-        return wall, np.empty((0, 2))  # no turnback, return original wall and empty wall
 
     def _combine_inflections(self):
         i1, i2 = self.body1.inflections, self.body2.inflections
@@ -222,26 +228,58 @@ class Geometry:
         return bot, top
 
 
-    def get_walls(self, x_cur, active_inflections=None): 
-        active_inflections = active_inflections or []
-        infl_walls = {inf.wall[0]: inf for inf in active_inflections}
+    # def get_walls(self, x_cur, active_inflections=None): 
+    #     active_inflections = active_inflections or []
+    #     infl_walls = {inf.wall[0]: inf for inf in active_inflections}
 
-        def get_wall_segments(body, x_cur, infl_walls):
-            segs = []
-            for wall in [body.wall1, body.wall2]:
-                for seg in wall._create_segments():  # precomputed segments
-                    if seg.x_start <= x_cur <= seg.x_end:
-                        # If this wall has an active inflection, override sigma
-                        if wall.wall_id in infl_walls:
-                            seg = WallSegment(seg.x_start, seg.y_start,
-                                            seg.x_end, seg.y_end,
-                                            infl_walls[wall.wall_id].sigma[0],
-                                            seg.normal, wall.wall_id)
-                        segs.append(seg)
-                        break  # only one active segment per wall at x_cur
-            return segs
+    #     def get_wall_segments(body, x_cur, infl_walls):
+    #         segs = []
+    #         for wall in [body.wall1, body.wall2]:
+    #             for seg in wall._create_segments():  # precomputed segments
+    #                 if seg.x_start <= x_cur <= seg.x_end:
+    #                     # If this wall has an active inflection, override sigma
+    #                     if wall.wall_id in infl_walls:
+    #                         seg = WallSegment(seg.x_start, seg.y_start,
+    #                                         seg.x_end, seg.y_end,
+    #                                         infl_walls[wall.wall_id].sigma[0],
+    #                                         seg.normal, wall.wall_id)
+    #                     segs.append(seg)
+    #                     break  # only one active segment per wall at x_cur
+    #         return segs
+
+    #     segments = []
+    #     segments.extend(get_wall_segments(self.body1, x_cur, infl_walls))
+    #     segments.extend(get_wall_segments(self.body2, x_cur, infl_walls))
+    #     return segments if segments else None
+
+    def get_walls(self, x_cur, active_inflections=None):
+        active_inflections = active_inflections or []
 
         segments = []
-        segments.extend(get_wall_segments(self.body1, x_cur, infl_walls))
-        segments.extend(get_wall_segments(self.body2, x_cur, infl_walls))
+
+        for body in [self.body1, self.body2]:
+            for wall in [body.wall1, body.wall2]:
+                # Find default segment spanning x_cur
+                seg = next((s for s in wall.segments if s.x_start <= x_cur <= s.x_end), None)
+
+                # Check for active inflection for this wall + body at x_cur
+                inf = next(
+                    (inf for inf in active_inflections
+                    if inf.wall[0] == wall.wall_id and inf.body[0] == body.body_id
+                        and np.isclose(inf.x[0], x_cur)),
+                    None
+                )
+
+                if inf is not None:
+                    # Pick the segment that begins at the inflection point
+                    seg_inf = next(
+                        (s for s in wall.segments 
+                        if np.isclose(s.x_start, inf.x[0]) and np.isclose(s.y_start, inf.y[0])),
+                        seg  # fallback to default if not found
+                    )
+                    seg = seg_inf
+
+                if seg is not None:
+                    segments.append(seg)
+
         return segments if segments else None

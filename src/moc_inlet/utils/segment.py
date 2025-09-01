@@ -14,17 +14,31 @@ class Segment:
         self.y_end = y_end
 
     def y_at(self, x: float) -> float:
+        if x < self.x_start or x > self.x_end:
+            return None
         return self.y_start + np.tan(self.sigma) * (x - self.x_start)
 
     def x_at(self, y: float) -> float:
         return self.x_start + (y - self.y_start) / np.tan(self.sigma)
 
-    def set_end(self, x_end, y_end):
+    def terminate(self, x_end):
         self.x_end = x_end
-        self.y_end = y_end
+        self.y_end = self.y_at(x_end)
 
     def span_x(self):
         return min(self.x_start, self.x_end), max(self.x_start, self.x_end)
+    
+    def _get_line_params(self):
+        """
+        Return parametric form (x,y) = (x0,y0) + t*(dx,dy).
+        For finite segs:  t [0,1].
+        For waves with x_end=inf: t ≥ 0.
+        """
+        if np.isinf(self.x_end):
+            dx, dy = np.cos(self.sigma), np.sin(self.sigma)
+        else:
+            dx, dy = self.x_end - self.x_start, self.y_end - self.y_start
+        return (self.x_start, self.y_start), (dx, dy)
 
 
 class WallSegment(Segment):
@@ -51,9 +65,10 @@ class Slipstream(Segment):
         self.post_state = post_state
 
 class Farfield(Segment):
-    def __init__(self, x0, y0, x1, y1, sigma, normal):
+    def __init__(self, x0, y0, x1, y1, sigma, normal, state=None):
         super().__init__(x0, y0, sigma, x_end=x1, y_end=y1)
         self.normal = normal
+        self.state = state
 
         
 
@@ -81,31 +96,36 @@ class SegmentList:
         self.segments.append(seg)
 
     def get_crossings(self, x, tol=1e-12):
-        y_coords = []
-        sigma_values = []
-        segments_out = []
+        """
+        Segments cut by vertical line x = const.
+        """
+        y_coords, sigmas, segs_out = [], [], []
 
         for seg in self.segments:
             xmin, xmax = seg.span_x()
-            if not np.isfinite(xmax):
-                xmax = x + 1e6  # extend for infinite segments
             if xmin - tol <= x <= xmax + tol:
                 try:
                     y_val = seg.y_at(x)
-                except:
+                except Exception:
                     continue
-                y_coords.append(float(y_val))  # ensure scalar
-                sigma_values.append(seg.sigma)
-                segments_out.append(seg)
+                y_coords.append(float(y_val))
+                sigmas.append(float(seg.sigma))
+                segs_out.append(seg)
 
-        if sigma_values:
-            # lexsort: primary key sigma, secondary key y
-            indices = np.lexsort((y_coords, sigma_values))
-            y_coords = np.array(y_coords)[indices]
-            sigma_values = np.array(sigma_values)[indices]
-            segments_out = np.array(segments_out, dtype=object)[indices]
+        if sigmas:
+            idx = np.lexsort((y_coords, sigmas))
+            y_coords = np.array(y_coords)[idx]
+            sigmas = np.array(sigmas)[idx]
+            segs_out = np.array(segs_out, dtype=object)[idx]
+        return Crossings(y_coords, sigmas, segs_out)
 
-        return Crossings(y_coords, sigma_values, segments_out)
+
+    # def add_walls(self, wall1: "WallSegment", wall2: "WallSegment"):
+    #     self.segments.extend([wall1, wall2])
+
+
+
+
 
 
 
