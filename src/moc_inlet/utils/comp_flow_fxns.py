@@ -58,8 +58,8 @@ def pm_diff(M, nu, k):
 def pm_mach_solver(k, M, d):
     nu1 = pm_fxn(k, M)
     nu2 = nu1 + np.abs(d)
-    M2 = root_scalar(pm_diff, x0=2.0, x1=3.0, args=(nu2, k)).root
-    return M2
+    M2 = root_scalar(pm_diff, x0=M, x1=3*M, args=(nu2, k)).root
+    return M2, nu1, nu2
 
 def H(k, M_in, M_out): #Returns: post-expansion temperature ratio
     #Inputs: gamma, incoming Mach number, outgoing Mach number
@@ -99,12 +99,12 @@ def pm_solver(k, M, d):
     Inputs (from self): gas object, Mach number, relative turning angle
     Outputs: post-fan gas object, post-fan Mach number, fan angles v1 and v2 relative to horizontal
     """
-    M2 = pm_mach_solver(k, M, np.abs(d))
+    M2, nu1, nu2 = pm_mach_solver(k, M, np.abs(d))
     P2_P1 = (H(k, M, M2)) ** (k / (k - 1))
     T2_T1 = (H(k, M, M2))
     mu1 = np.asin((1/M))
     mu2 = np.asin((1/M2))
-    return T2_T1, P2_P1, M2, mu1, mu2
+    return M2, nu1, nu2, mu1, mu2, T2_T1, P2_P1
 
 
 def shock_fan_solver(k, M0, T0, P0, d1, d2):

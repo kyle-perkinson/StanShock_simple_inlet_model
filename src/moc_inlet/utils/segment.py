@@ -42,10 +42,11 @@ class Segment:
 
 
 class WallSegment(Segment):
-    def __init__(self, x0, y0, x1, y1, sigma, normal, wall_id):
+    def __init__(self, x0, y0, x1, y1, sigma, normal, wall_id, body_id):
         super().__init__(x0, y0, sigma, x_end=x1, y_end=y1)
-        self.normal = normal
-        self.wall_id = wall_id
+        self.normal = normal       # outward-pointing normal
+        self.wall_id = wall_id     # e.g. "upper", "lower"
+        self.body_id = body_id     # e.g. integer or string ID for the body
 
 class Wave(Segment):
     """
@@ -59,10 +60,9 @@ class Wave(Segment):
         self.wave_type = wave_type
 
 class Slipstream(Segment):
-    def __init__(self, pre_state, post_state, sigma, x_start, y_start):
+    def __init__(self, x_start, y_start, sigma, normal):
         super().__init__(x_start, y_start, sigma)
-        self.pre_state = pre_state
-        self.post_state = post_state
+        self.normal = normal #normal pointing into flow domain this bounds (will have two per riemann problem)
 
 class Farfield(Segment):
     def __init__(self, x0, y0, x1, y1, sigma, normal, state=None):
@@ -118,16 +118,6 @@ class SegmentList:
             sigmas = np.array(sigmas)[idx]
             segs_out = np.array(segs_out, dtype=object)[idx]
         return Crossings(y_coords, sigmas, segs_out)
-
-
-    # def add_walls(self, wall1: "WallSegment", wall2: "WallSegment"):
-    #     self.segments.extend([wall1, wall2])
-
-
-
-
-
-
 
 class Crossings:
     """Container for all segment intersections (vectorized, sliceable)."""

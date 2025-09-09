@@ -1,6 +1,6 @@
 from moc_inlet.utils.flowstate import FlowState
 from moc_inlet.utils.segment import SegmentList, Segment, WallSegment, Wave, Slipstream, Farfield
-from moc_inlet.utils.geometry import Geometry, Inflections
+from moc_inlet.utils.geometry import Geometry, Inflection
 import numpy as np
 from itertools import groupby
 
@@ -30,7 +30,6 @@ class SolutionSlice:
         self.regions = regions
 
     def __iter__(self):
-        """Allow iteration directly over regions."""
         return iter(self.regions)
 
     def __len__(self):
@@ -47,103 +46,125 @@ class SolutionSlice:
         unique_segs = list({id(s): s for s in segs}.values())
         return SegmentList(self.x, unique_segs)
     
-    def get_flowstate(self, x_next: float, y_next: float):
+    def get_flowstate(self, x_next: float, y_next: float, eps: float = 1e-7):
         """
         Return the FlowState at a given x_next and y_next within this slice.
+        Skips regions that are wall–wall bounded or have no flowstate.
+        If nothing is found, retries slightly upstream in x.
+        Raises ValueError if still no valid region is found.
         """
-        for region in self.regions:
-            y_lower = y_at(region.lower, x_next)
-            y_upper = y_at(region.upper, x_next)
+        def _search(xq, yq):
+            for region in self.regions:
+                # Skip wall–wall regions
+                if isinstance(region.lower, WallSegment) and isinstance(region.upper, WallSegment):
+                    continue
+                if region.flowstate is None:
+                    continue
 
-            if y_lower > y_upper:
-                y_lower, y_upper = y_upper, y_lower
+                y_lower = region.lower.y_at(xq)
+                y_upper = region.upper.y_at(xq)
 
-            if y_lower <= y_next <= y_upper:
-                return region.flowstate
-        return None
+                if y_lower > y_upper:
+                    y_lower, y_upper = y_upper, y_lower
+
+                if y_lower <= yq <= y_upper:
+                    return region.flowstate
+            return None
+
+        fs = _search(x_next, y_next)
+        if fs is not None:
+            return fs
+
+        fs = _search(x_next - eps, y_next)
+        if fs is not None:
+            return fs
+
+        raise ValueError(
+            f"No valid flowstate found at (x={x_next}, y={y_next}) in slice at x={self.x}"
+        )
 
 
 
-
-def build_regions(seglist: SegmentList, x_i: float, geom: Geometry) -> SolutionSlice:
+def build_regions(domain: Domain, seglist: SegmentList, x_new: float, geom: Geometry, tol=1e-12) -> SolutionSlice:
+    """
+    Build regions at slice x_new, using prior slice in domain to propagate FlowStates.
+    Prevent impossible wall/wall regions from different bodies.
+    """
     segs = list(seglist)
-    seg_positions = [(seg, seg.y_at(x_i)) for seg in segs]
+    seg_positions = [(seg, y_at(seg, x_new)) for seg in segs]
 
-    tol = 1e-12  # tolerance for clustering same y
-    # sort primarily by y (rounded), secondarily by slope (angle)
+    # Sort primarily by y, then by slope
     seg_positions.sort(key=lambda t: (round(t[1], 12), np.tan(t[0].sigma)))
-
-    # group by y within tolerance
-    grouped = []
-    for _, group in groupby(seg_positions, key=lambda t: round(t[1], 12)):
-        g = list(group)
-        # sort group by slope explicitly (so fans split properly)
-        g.sort(key=lambda t: np.tan(t[0].sigma))
-        grouped.extend(g)
+    grouped = seg_positions
 
     regions = []
+    prev_slice = domain.slices[-1] if domain.slices else None
+
+    # Helper to determine body_id of a wall segment
+    def get_body_id(seg):
+        if isinstance(seg, WallSegment):
+            for body in [geom.body1, geom.body2]:
+                if seg in body.wall1.segments or seg in body.wall2.segments:
+                    return body.body_id
+        return None
+
     for (seg_low, y_low), (seg_high, y_high) in zip(grouped[:-1], grouped[1:]):
+        # Skip impossible wall/wall regions
+        if isinstance(seg_low, WallSegment) and isinstance(seg_high, WallSegment):
+            body_low = get_body_id(seg_low)
+            body_high = get_body_id(seg_high)
+            if body_low != body_high:
+                continue
+
+
         fs = None
-        above_low, below_low = states_above_below(seg_low)
-        above_high, below_high = states_above_below(seg_high)
+        if prev_slice is not None:
+            for old_reg in prev_slice:
+                if old_reg.lower is seg_low and old_reg.upper is seg_high:
+                    fs = old_reg.flowstate
+                    break
 
-        if isinstance(seg_low, Farfield) and seg_low is geom.lower_bbox:
-            fs = seg_low.state
-        elif isinstance(seg_high, Farfield) and seg_high is geom.upper_bbox:
-            fs = seg_high.state
-        else:
-            # regular resolution
-            if above_low is not None:
-                fs = above_low
-            if below_high is not None:
-                fs = below_high
+        if fs is None:
+            above_low, below_low = states_above_below(seg_low)
+            above_high, below_high = states_above_below(seg_high)
 
-            if fs is None:
-                if isinstance(seg_low, WallSegment):
-                    if seg_low.normal[1] < 0 and above_high is not None:
-                        fs = above_high
-                    elif seg_low.normal[1] > 0 and below_high is not None:
-                        fs = below_high
+            if isinstance(seg_low, Farfield) and seg_low is geom.lower_bbox:
+                fs = seg_low.state
+            elif isinstance(seg_high, Farfield) and seg_high is geom.upper_bbox:
+                fs = seg_high.state
+            else:
+                if above_low is not None:
+                    fs = above_low
+                if below_high is not None:
+                    fs = below_high
 
-                if isinstance(seg_high, WallSegment):
-                    if seg_high.normal[1] > 0 and below_low is not None:
-                        fs = below_low
-                    elif seg_high.normal[1] < 0 and above_low is not None:
-                        fs = above_low
+                if fs is None:
+                    if isinstance(seg_low, (WallSegment, Slipstream)):
+                        if seg_low.normal[1] < 0 and above_high is not None:
+                            fs = above_high
+                        elif seg_low.normal[1] > 0 and below_high is not None:
+                            fs = below_high
+                    if isinstance(seg_high, (WallSegment, Slipstream)):
+                        if seg_high.normal[1] > 0 and below_low is not None:
+                            fs = below_low
+                        elif seg_high.normal[1] < 0 and above_low is not None:
+                            fs = above_low
 
         regions.append(Region(seg_low, seg_high, fs))
 
-    return SolutionSlice(x_i, regions)
+    return SolutionSlice(x_new, regions)
+
 
 
 def states_above_below(segment: Segment):
-    if isinstance(segment, (Wave, Slipstream)):
+    if isinstance(segment, (Wave)):
         orientation = segment.sigma - segment.pre_state.theta
         if orientation > 0:  
             return segment.pre_state, segment.post_state
         else:
             return segment.post_state, segment.pre_state
-    # if isinstance(segment, (Farfield)):
-    #     return segment.state
-    elif isinstance(segment, (WallSegment, Farfield)):
+    elif isinstance(segment, (WallSegment, Farfield, Slipstream)):
         return None, None
     
 def y_at(segment, x_i):
     return segment.y_start + np.tan(segment.sigma) * (x_i - segment.x_start)
-
-
-def get_inflow(x_next: float, inflection, solution_slice: SolutionSlice):
-    #used for incident waves to determine appropriate state. 
-    # #not used for wall/wave or wave/wave interactions!
-    y_inflect = inflection.y
-
-    for region in solution_slice:
-        y_lower = y_at(region.lower, x_next)
-        y_upper = y_at(region.upper, x_next)
-
-        # ensure y_lower < y_upper
-        if y_lower > y_upper:
-            y_lower, y_upper = y_upper, y_lower
-        if y_lower <= y_inflect <= y_upper:
-            return region.flowstate
-    return None

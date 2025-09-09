@@ -22,20 +22,4 @@ def compute_normals(points):
     area = 0.5 * np.sum(pts[:-1, 0]*pts[1:, 1] - pts[1:, 0]*pts[:-1, 1])
     normals = right if area > 0 else left
     normals /= np.linalg.norm(normals, axis=1)[:, None]
-    # plot_normals(pts, normals)
     return normals, pts
-
-
-
-
-def plot_normals(points, normals, scale=0.05):
-    pts = np.asarray(points)
-    mids = 0.5 * (pts[:-1] + pts[1:])  # segment midpoints
-    plt.plot(pts[:,0], pts[:,1], 'k-', lw=1)  # polygon / polyline
-    plt.quiver(
-        mids[:,0], mids[:,1], 
-        normals[:,0], normals[:,1], 
-        angles='xy', scale_units='xy', scale=1/scale, color='r'
-    )
-    plt.axis('equal')
-    plt.show()
