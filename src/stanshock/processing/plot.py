@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
+    from stanshock.components.combustor import Combustor
+    from stanshock.system.backend import Array
 
 
 class XTDiagram:
@@ -18,8 +26,14 @@ class XTDiagram:
             limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
     """
 
-    def __init__(self, domain, variable, skipSteps=0, x=None, limits=None):
-        self.name = None
+    def __init__(
+        self,
+        domain: Combustor,
+        variable: str,
+        skipSteps: int = 0,
+        x: Array | None = None,
+        limits: tuple[float, float] | None = None,
+    ) -> None:
         self.skipSteps = 0
         self.limits = limits
 
@@ -28,19 +42,20 @@ class XTDiagram:
         # check interpolation grid
         geometry = domain.geometry
         if x is None:
-            self.x = geometry.x
-        elif (x[-1] > geometry.x[-1]) or (x[0] < geometry.x[0]):
+            self.x = geometry.xf
+        elif (x[-1] > geometry.xc[-1]) or (x[0] < geometry.xc[0]):
             msg = "Invalid Interpolation Grid"
             raise Exception(msg)
         else:
             self.x = x
 
-        self.variable = []  # list of numpy arrays of the variable w.r.t x
-        self.t = []  # list of times
+        self.variable: list[Array] = []  # list of numpy arrays of the variable w.r.t x
+        self.t: list[float] = []  # list of times
+        self.mdot: list[float] = []  # list of mass flow rates
 
         self.update(domain)
 
-    def update(self, domain):
+    def update(self, domain: Combustor) -> None:
         """
         This method updates the XT diagram.
             inputs:
@@ -49,37 +64,32 @@ class XTDiagram:
         variable = self.name
         state = domain.state
         geometry = domain.geometry
-        idx_cells = domain.idx_cells
 
         if variable in ["density", "r", "rho"]:
-            self.variable.append(
-                np.interp(self.x, geometry.x, state.density[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.density))
         elif variable in ["velocity", "u"]:
-            self.variable.append(
-                np.interp(self.x, geometry.x, state.velocity[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.velocity))
         elif variable in ["pressure", "p"]:
-            self.variable.append(
-                np.interp(self.x, geometry.x, state.pressure[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.pressure))
         elif variable in ["temperature", "t"]:
             T = domain.physics.get_temperature(state)
-            self.variable.append(np.interp(self.x, geometry.x, T[idx_cells]))
+            self.variable.append(np.interp(self.x, geometry.xc, T))
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            self.variable.append(np.interp(self.x, geometry.x, state.gamma[idx_cells]))
+            self.variable.append(np.interp(self.x, geometry.xc, state.gamma))
         elif variable in domain.physics.scalar_names:
             scalarIndex = domain.physics.scalar_names.index(variable)
             self.variable.append(
-                np.interp(self.x, geometry.x, state.composition[idx_cells, scalarIndex])
+                np.interp(self.x, geometry.xc, state.composition[:, scalarIndex])
             )
         elif variable in ["mach", "m"]:
             M = np.abs(state.velocity) / domain.physics.get_sound_speed(state)
-            self.variable.append(np.interp(self.x, self.x, M[idx_cells]))
+            self.variable.append(np.interp(self.x, geometry.xc, M))
         else:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
         self.t.append(domain.t)
+        if domain.injector is not None:
+            self.mdot.append(domain.injector.mdot_f_interp(domain.t))
 
     def save_to_csv(self, output_dir="xt_output"):
         """
@@ -110,37 +120,51 @@ class XTDiagram:
             inputs:
                 figdir = directory in which to save the plot
         """
-        plt.figure()
         t = [t * 1000.0 for t in self.t]
+        mdot = [mdot * 1.0e3 for mdot in self.mdot]
         X, T = np.meshgrid(self.x, t)
         variableMatrix = np.zeros(X.shape)
         for k, variablek in enumerate(self.variable):
             variableMatrix[k, :] = variablek
         variable = self.name
         if variable in ["density", "r", "rho"]:
-            plt.title(r"$\rho~[\mathrm{kg/m^3}]$")
+            title = r"$\rho~[\mathrm{kg/m^3}]$"
         elif variable in ["velocity", "u"]:
-            plt.title(r"$u~[\mathrm{m/s}]$")
+            title = r"$u~[\mathrm{m/s}]$"
         elif variable in ["pressure", "p"]:
             variableMatrix /= 1.0e5  # convert to bar
-            plt.title(r"$p~[\mathrm{bar}]$")
+            title = r"$p~[\mathrm{bar}]$"
         elif variable in ["temperature", "t"]:
-            plt.title(r"$T~[\mathrm{K}]$")
+            title = r"$T~[\mathrm{K}]$"
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            plt.title(r"$\gamma~[\mathrm{-}]$")
+            title = r"$\gamma~[\mathrm{-}]$"
         elif variable in ["mixture fraction"]:
-            plt.title(r"$Z~[\mathrm{-}]$")
+            title = r"$Z~[\mathrm{-}]$"
         elif variable in ["progress variable"]:
-            plt.title(r"$C~[\mathrm{-}]$")
+            title = r"$C~[\mathrm{-}]$"
         elif variable in ["mach", "m"]:
-            plt.title(r"$M~[\mathrm{-}]$")
+            title = r"$M~[\mathrm{-}]$"
         else:
-            plt.title(r"$\mathrm{" + variable + "}$")
+            title = r"$\mathrm{" + variable + "}$"
+
+        has_mdot = mdot and any(mdot)
+        figsize = (6, 4) if has_mdot else (6, 3)
+
+        fig: Figure = plt.figure(figsize=figsize)
+        if has_mdot:
+            gs = fig.add_gridspec(1, 3, width_ratios=[6, 1, 0.5], wspace=0.125)
+            main_ax = fig.add_subplot(gs[0, 0])
+            mdot_ax = fig.add_subplot(gs[0, 1], sharey=main_ax)
+            cbar_ax = fig.add_subplot(gs[0, 2])
+        else:
+            main_ax = plt.gca()
+
+        fig.suptitle(title, fontsize=14)
 
         if self.limits is None:
-            plt.pcolormesh(X, T, variableMatrix, cmap="jet")
+            pcm = main_ax.pcolormesh(X, T, variableMatrix, cmap="jet")
         else:
-            plt.pcolormesh(
+            pcm = main_ax.pcolormesh(
                 X,
                 T,
                 variableMatrix,
@@ -148,21 +172,35 @@ class XTDiagram:
                 vmin=self.limits[0],
                 vmax=self.limits[1],
             )
-        plt.xlabel(r"$x~[\mathrm{m}]$")
-        plt.ylabel(r"$t~[\mathrm{ms}]$")
-        plt.axis([min(self.x), max(self.x), min(t), max(t)])
-        plt.colorbar()
-        plt.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
+
+        main_ax.set_xlabel(r"$x~[\mathrm{m}]$")
+        main_ax.set_ylabel(r"$t~[\mathrm{ms}]$")
+        main_ax.set_xlim(min(self.x), max(self.x))
+        main_ax.set_ylim(min(t), max(t))
+
+        if has_mdot:
+            fig.colorbar(pcm, cax=cbar_ax)
+        else:
+            fig.colorbar(pcm, ax=main_ax)
+
+        if has_mdot:
+            mdot_ax.plot(mdot, t, "r-", linewidth=2)
+            mdot_ax.set_xlabel(r"$\dot{m}~[\mathrm{g/s}]$")
+            mdot_ax.set_yticklabels([])
+            mdot_ax.grid(True, axis="x", linestyle="--", alpha=0.7)
+
+        fig.tight_layout()
+        fig.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
 
 
-def add_h_plot(domain, ax, scale=1.0):
+def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
     ax.patch.set_visible(False)
 
     geometry = domain.geometry
     t = domain.t
-    x = geometry.x
+    x = geometry.xf
     h = geometry.h(t, x) if geometry.h is not None else geometry.d_outer(t, x)
     ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
     ax1.axhline(0, color="0.8", linestyle="--")
@@ -234,7 +272,8 @@ def plot_state(domain, filename, limits):
     physics = domain.physics
     state = domain.state
     geometry = domain.geometry
-    idx_cells = domain.idx_cells
+    idx_cells = geometry.idx_cells
+    x = xscale * geometry.xc[idx_cells]
     T = physics.get_temperature(state)
 
     subtitle_str = []
@@ -247,7 +286,7 @@ def plot_state(domain, filename, limits):
     subtitle = ", ".join(subtitle_str)
 
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(geometry.x * xscale, state.density[idx_cells])
+    ax[0].plot(x, state.density[idx_cells])
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     if geometry.h is not None:
@@ -257,7 +296,7 @@ def plot_state(domain, filename, limits):
     else:
         ax[0].set_ylim(rlims)
 
-    ax[1].plot(geometry.x * xscale, state.velocity[idx_cells])
+    ax[1].plot(x, state.velocity[idx_cells])
     ax[1].set_ymargin(0.1)
     if ulims == [0, 0]:
         ax[1].set_ylim([0, 800])
@@ -268,6 +307,7 @@ def plot_state(domain, filename, limits):
     if geometry.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
+    ax[2].plot(x, state.pressure[idx_cells])
     ax[2].set_ymargin(0.1)
     if plims == [0, 0]:
         ax[2].plot(geometry.x * xscale, state.pressure[idx_cells])
@@ -280,14 +320,14 @@ def plot_state(domain, filename, limits):
     if geometry.h is not None:
         add_h_plot(domain, ax[2], scale=xscale)
 
-    ax[3].plot(geometry.x * xscale, T[idx_cells])
+    ax[3].plot(x, T[idx_cells])
     ax[3].set_ymargin(0.1)
     ax[3].set_ylabel(r"$T$ [K]")
     if geometry.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
     M = np.abs(state.velocity) / physics.get_sound_speed(state)
-    ax[4].plot(geometry.x * xscale, M[idx_cells])
+    ax[4].plot(x, M[idx_cells])
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
@@ -308,9 +348,9 @@ def plot_state(domain, filename, limits):
         Y_H2 = Y[:, physics.gas.species_index("H2")]
         Y_OH = Y[:, physics.gas.species_index("OH")]
         Y_H2O = Y[:, physics.gas.species_index("H2O")]
-    ax[5].plot(geometry.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
-    ax[5].plot(geometry.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
-    ax[5].plot(geometry.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
+    ax[5].plot(x, Y_H2, label=r"$\mathrm{H}_2$")
+    ax[5].plot(x, Y_OH, label=r"$\mathrm{OH}$")
+    ax[5].plot(x, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
     if Y_H2.max() < 1e-6:
         ax[5].set_ylim(-1e-3, 1e-3)
     else:
@@ -336,88 +376,6 @@ def plot_state(domain, filename, limits):
     )
     fig.suptitle(full_title)
 
-    plt.tight_layout()
-    plt.savefig(filename, bbox_inches="tight", dpi=300)
+    fig.tight_layout()
+    fig.savefig(filename, bbox_inches="tight", dpi=300)
     plt.close()
-
-
-class SnapshotDiagram:
-    """
-    This class stores and plots snapshots of a given variable over the spatial domain at selected time intervals.
-
-    Inputs:
-        domain: simulation domain with geometry and state
-        variable: string specifying the variable to plot (e.g., "pressure", "temperature")
-        skipSteps: number of iterations between updates
-        x: mesh for interpolation (defaults to domain mesh)
-    """
-
-    def __init__(self, domain, variable, skipSteps=0, x=None):
-        self.name = variable.lower()
-        self.skipSteps = skipSteps
-        self.x = x if x is not None else domain.geometry.x
-
-        self.snapshots = []  # List of (time, interpolated variable array)
-        self.counter = 0
-
-        self.update(domain)
-
-    def update(self, domain):
-        if self.counter % self.skipSteps != 0:
-            self.counter += 1
-            return
-
-        state = domain.state
-        geometry = domain.geometry
-        physics = domain.physics
-        x = self.x
-        variable = self.name
-
-        if variable in ["density", "r", "rho"]:
-            y = np.interp(x, geometry.x, state.density)
-        elif variable in ["velocity", "u"]:
-            y = np.interp(x, geometry.x, state.velocity)
-        elif variable in ["pressure", "p"]:
-            y = np.interp(x, geometry.x, state.pressure / 1e5)  # Convert to bar
-        elif variable in ["temperature", "t"]:
-            T = physics.get_temperature(state)
-            y = np.interp(x, geometry.x, T)
-        elif variable in ["gamma", "g"]:
-            y = np.interp(x, geometry.x, state.gamma)
-        elif variable in ["mach", "m"]:
-            M = np.abs(state.velocity) / physics.get_sound_speed(state)
-            y = np.interp(x, geometry.x, M)
-        elif variable in physics.scalar_names:
-            i = physics.scalar_names.index(variable)
-            y = np.interp(x, geometry.x, state.composition[:, i])
-        else:
-            msg: str = f"Invalid Variable Name: {variable}"
-            raise Exception(msg)
-
-        self.snapshots.append((domain.t, y))
-        self.counter += 1
-
-    def plot(self, figdir="."):
-        """
-        Plot snapshots over the domain at each sampled time
-        """
-        plt.figure()
-        for t, y in self.snapshots:
-            plt.plot(self.x, y, label=f"{t * 1e3:.2f} ms")
-
-        plt.xlabel("x [m]")
-        var_label = {
-            "pressure": "p [bar]",
-            "temperature": "T [K]",
-            "density": r"$\rho$ [kg/m³]",
-            "velocity": "u [m/s]",
-            "gamma": r"$\gamma$",
-            "mach": "M",
-        }.get(self.name, self.name)
-        plt.ylabel(var_label)
-        plt.title(f"{var_label} snapshots")
-        plt.legend(loc="best", fontsize="small", ncol=2)
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(Path(figdir) / f"{self.name}_snapshots.png", dpi=300)
-        plt.close()

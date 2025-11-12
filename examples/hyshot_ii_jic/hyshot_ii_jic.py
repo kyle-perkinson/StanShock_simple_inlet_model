@@ -6,36 +6,36 @@ from pathlib import Path
 import cantera as ct
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy import interpolate, optimize
+from scipy import optimize
 
 from stanshock.components.combustor import Combustor
+from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import Inflow
 from stanshock.physics.flamelet import FPVTable
-from stanshock.physics.jicf import JICModel
 from stanshock.processing.plot import XTDiagram
-
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-    }
-)
-plt.rcParams["axes.xmargin"] = 0
-plt.rcParams["axes.ymargin"] = 0
+from stanshock.system.geometry import Box
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14
 MEDIUM_SIZE = 16
 BIGGER_SIZE = 18
 
-plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
-plt.rc("axes", titlesize=SMALL_SIZE)  # fontsize of the axes title
-plt.rc("axes", labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
-plt.rc("xtick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("legend", fontsize=XSMALL_SIZE)  # legend fontsize
-plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
+plt.rcParams.update(
+    {
+        "text.usetex": False,
+        # "font.family": "serif",
+        # "font.serif": ["Computer Modern Roman"],
+        "axes.xmargin": 0,
+        "axes.ymargin": 0,
+        "font.size": SMALL_SIZE,
+        "axes.titlesize": SMALL_SIZE,
+        "axes.labelsize": MEDIUM_SIZE,
+        "xtick.labelsize": SMALL_SIZE,
+        "ytick.labelsize": SMALL_SIZE,
+        "legend.fontsize": XSMALL_SIZE,
+        "figure.titlesize": BIGGER_SIZE,
+    }
+)
 
 # Plotting utilities
 scale = 1e3
@@ -43,7 +43,7 @@ scale = 1e3
 
 def add_h_plot(ax):
     ax1 = ax.twinx()
-    ax1.plot(x * scale, h * scale, "k", linestyle="--")
+    ax1.plot(xf * scale, h * scale, "k", linestyle="--")
     ax1.axhline(0, color="k", linestyle="--")
     ax1.set_aspect("equal")
     ax1.set_ylabel("h [mm]")
@@ -58,8 +58,8 @@ figdir.mkdir(exist_ok=True)
 (figdir / "anim").mkdir(exist_ok=True)
 
 # Chemistry
-mech = "ohn.yaml"
-table_file = "./flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
+mech = "../../data/mechanisms/h2_boivin_9sp_12r_mod.yaml"
+table_file = "./h2_table/flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
 gas = ct.Solution(mech)
 X_ox = "O2:0.21,N2:0.79"
 X_f = "H2:1"
@@ -194,8 +194,8 @@ t_phi_gl_schedule = np.array(
         [0.1 * tau, 0.0],
         [8.0 * tau, 0.35],
         [10.0 * tau, 0.35],
-        [14.0 * tau, 0.6],
-        [16.0 * tau, 0.6],
+        [14.0 * tau, 0.45],
+        [16.0 * tau, 0.45],
     ]
 )
 # t_phi_gl_schedule = np.array(
@@ -220,18 +220,12 @@ T_f = T_f[-1]
 
 # Define the grid
 N_x = 200
-x = np.linspace(0, L_const + L_exhaust, N_x)
-h = np.zeros_like(x)
-h[x < L_const] = h_const
-h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
-A = h * w
-lnA = np.log(A)
-dlnA_dx_data = np.gradient(lnA, x)
-dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx_data, kind="cubic")
-
-
-def dlnA_dx(x, t):
-    return dlnA_dx_interp(x)
+xf = np.linspace(0, L_const + L_exhaust, N_x + 1)
+xc = 0.5 * (xf[1:] + xf[:-1])
+h = np.zeros_like(xf)
+h[xf < L_const] = h_const
+h[xf >= L_const] = h_const + (xf[xf >= L_const] - L_const) * np.tan(theta_exhaust)
+geometry = Box(xf=xf, h=h, w=w)
 
 
 # PDF sampling parameters
@@ -242,7 +236,6 @@ n_bins_Z_pdf = int(np.ceil(1.0 / dZ_pdf))
 # Initialize the state
 gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
-initState = gas_init, U_in
 
 # Define the boundary conditions
 BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0)))
@@ -250,28 +243,35 @@ BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
 # Load the FPV table
-fpv_table = FPVTable(table_file)
+fpv_table = FPVTable(
+    table_file,
+    gas,
+    ox_def=X_ox,
+    fuel_def=X_f,
+    prog_def={"H2O": 1.0},
+    p_correction=False,
+    T_correction=False,
+)
 
 # #################################################################
 
 # Build the injector model
 jic = JICModel(
-    gas,
-    "H2",
-    x,
-    x_inj,
-    L_const,
-    w,
-    h[0],
-    N_f,
-    2 * r_f,
-    t_f,
-    rho_f,
-    U_f,
-    T_f,
-    rho_in,
-    U_in,
-    T_in,
+    fuel="H2",
+    x=xc,
+    x_inj=x_inj,
+    x_noz=L_const,
+    w=w,
+    h=h[0],
+    n_inj=N_f,
+    d_inj=2 * r_f,
+    t_inj=t_f,
+    rho_inj=rho_f,
+    u_inj=U_f,
+    T_inj=T_f,
+    rho=rho_in,
+    u=U_in,
+    T=T_in,
     alpha=1e6,
     fpv_table=fpv_table,
     load_Z_3D=(datadir / "Z_3D.npy").exists(),
@@ -403,26 +403,20 @@ jic = JICModel(
 
 # Initialize and run the simulation
 ss = Combustor(
-    gas,
-    h=h,
-    w=w,
-    dlnA_dx=dlnA_dx,
+    xf=xf,
+    geometry=geometry,
     wall_temperature=300.0,
     include_boundary_layer=True,
-    initialization=("constant", initState, x),
+    initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
-    sourceTerms=None,
+    source_terms=None,
     injector=jic,
-    ox_def=X_ox,
-    fuel_def=X_f,
-    prog_def={"H2O": 1.0},
     cfl=0.5,
-    physics="FPV",
-    fpv_table=fpv_table,
+    physics=fpv_table,
     reacting=True,
     include_diffusion=False,
-    output_every=10,
-    plot_state_interval=10,
+    output_every=100,
+    plot_state_interval=100,
 )
 
 plot_variables = [

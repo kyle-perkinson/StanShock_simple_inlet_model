@@ -42,14 +42,14 @@ def main(
     if plot_results:
         plt.close("all")
         mpl.rcParams["font.size"] = fontsize
-        plt.rc("text", usetex=True)
+        # plt.rc("text", usetex=True)
 
     # set up geometry
     xLower = -LDriver
     xUpper = LDriven
     xShock = 0.0
     Delta = 10 * (xUpper - xLower) / float(nXFine)
-    x = np.linspace(xLower, xUpper, nXCoarse)
+    xf = np.linspace(xLower, xUpper, nXCoarse + 1)
 
     def d_inner(time: float, x: Array) -> Array:
         return np.zeros_like(x)
@@ -116,7 +116,7 @@ def main(
     physics_model = ThermoTable(gas1)
 
     ss = ShockTube(
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -127,6 +127,7 @@ def main(
         d_outer=d_outer,
         dlnA_dx=dlnA_dx,
     )
+    ss.state.gamma = ss.physics.get_gamma(ss.state)
 
     # Solve
     t0 = time.perf_counter()
@@ -140,11 +141,11 @@ def main(
     print("The process took ", t1 - t0)
 
     # recalculate at higher resolution with the insert
-    x = np.linspace(xLower, xUpper, nXFine)
+    xf = np.linspace(xLower, xUpper, nXFine + 1)
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -166,7 +167,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.geometry.x)))  # end wall probe
+    ss.probes.append(Probe(ss, max(ss.geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
@@ -177,15 +178,15 @@ def main(
     for diagram in ss.xt_diagrams:
         diagram.plot()
 
-    xInsert = ss.geometry.x
-    d_outer_insert = ss.geometry.d_outer(0.0, ss.geometry.x)
-    d_inner_insert = ss.geometry.d_inner(0.0, ss.geometry.x)
+    xInsert = ss.geometry.xc
+    d_outer_insert = ss.geometry.d_outer(0.0, ss.geometry.xc)
+    d_inner_insert = ss.geometry.d_inner(0.0, ss.geometry.xc)
 
     # recalculate at higher resolution without the insert
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -201,7 +202,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.geometry.x)))  # end wall probe
+    ss.probes.append(Probe(ss, max(ss.geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
