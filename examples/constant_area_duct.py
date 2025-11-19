@@ -9,7 +9,11 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.thermotable import ThermoTable
-from stanshock.processing.plot import SnapshotDiagram, XTDiagram
+from stanshock.numerics.boundary_conditions import Inflow
+from stanshock.processing.plot import  XTDiagram
+from stanshock.system.geometry import Box
+import os
+import glob
 
 plt.rcParams.update(
     {
@@ -44,117 +48,63 @@ figdir = Path("./figures")
 figdir.mkdir(exist_ok=True)
 (figdir / "anim").mkdir(exist_ok=True)
 
+for ext in ('*.png', '*.mp4'):
+    for file in glob.glob(os.path.join('figures', 'anim', ext)):
+        os.remove(file)
+
+
 # Chemistry
 mech = "data/mechanisms/Nitrogen.yaml"
 
-gas = ct.Solution(mech)
-"""
-GEOMETRY INPUTS
-    from ("Experimental Investigation of Inlet-Combustor Isolators for a Dual-Mode Scramjet...")
-        Note that the inlet conditions represent post shock properties (assuming 3 oblique shocks)
-"""
-H_th = 0.01016  # throat height, m
-L_H_th = 12.7  # isolator to throat height ratio
-L_iso = L_H_th * H_th  # isolator length, m
+h1 = 0.0698
+h2 = h1 / 1.2
 
-W = 0.0508  # Constant Scramjet Width (m)
+w = 0.0572
+l = 0.609 #m
+N_x = 500
+xShock = 4*l
+x = np.linspace(0, 5*l, N_x)
+# h_arr = np.ones_like(x) * h
+h_pts = np.array([h1, h1, h2])
+x_pts = np.array([0, 4*l, 5*l])
+h = np.interp(x, x_pts, h_pts)
+geometry = Box(xf=x,h=h,w=w)
 
 
 """
-AMBIENT CONDITIONS
+Boundary Conditions
 """
 gas1 = ct.Solution(mech)
 gas2 = ct.Solution(mech)
-# ISOLATOR INLET CONDITIONS
-M1 = 2.1993  # isolator inlet Mach number
-T1 = 152.48  # isolator inlet static temp, K
-p1 = 81741.125  # isolator inlet static pressure, Pa
+# INFLOW
+M1 = 1.72
+# M1 = 4.5  
+T1 = 300 
+# p1 = 81741.125
+p1 = 16.0e3
 gas1.TP = T1, p1  # isolator inlet solution/flow initialization
 u1 = M1 * gas1.sound_speed
 state1 = gas1, u1  # isolator inlet velocity, m/s
-# POST-SHOCK ISOLATOR CONDITIONS
-gas2.TP = T1 * 1.770, p1 * 1.519
-gas2.TP = 260, 2.55e5
-# u2 = (M1 * 0.542) * gas2.sound_speed
-u2 = 311
-state2 = gas2, u2
-# NOZZLE EXIT CONDITIONS
-p2 = 8278.763  # nozzle exit static pressure, Pa
 
-# Time parameters
-t_stab = 0.0025
-t_close = 0.8  # duration of closing nozzle
-tFinal = 1.25
-AR_i = 4.15
-AR_f = 1
+gas2.TP = T1*1.6, p1*3.0
+u2 = gas2.sound_speed*0.5
+state2 = gas2, u2
+limits = [T1, p1, gas1.density, [0,3], [0,5],[0,3],[0,0], [0,3]]
+# Mlims, plims, Tlims, ulims, rlims
+tFinal = 0.1
+
 
 physics_model = ThermoTable(gas1)
-
-# Define the grid
-N_x = 500
-xShock = 0.5 * L_iso
-
-
-def D_H(t, x):
-    return (2 * W * H(t, x)) / (W + H(t, x))
-
-
-def H(t, x):
-    x = np.asarray(x)  # ensure x is an array
-    return np.ones_like(x, dtype=float) * H_th
-
-
-def dHdx(t, x):
-    x = np.asarray(x)  # ensure x is an array
-    return np.zeros_like(x, dtype=float)
-
-
-def dHdt(t, x):
-    x = np.asarray(x)
-    return np.zeros_like(x)
-
-
-x = np.linspace(0, L_iso, N_x)
-
-
-def A(t, x):
-    return H(t, x) * W
-
-
-def dAdx(t, x):
-    return W * dHdx(t, x)
-
-
-def dAdt(t, x):
-    return W * dHdt(t, x)
-
-
-def dlnAdx(t, x):
-    return dAdx(t, x) / A(t, x)
-
-
-def dlnAdt(t, x):
-    return dAdt(t, x) / A(t, x)
-
-
-# Define the boundary conditions
-BC_inlet = gas1.density, u1, gas1.P, None
-BC_outlet = None, u2, gas2.P, None
-
+BC_inlet = Inflow(reference_state=(gas1.density, u1, gas1.P, (1.0)))
+BC_outlet = Inflow(reference_state=(gas2.density, None, gas2.P, (1.0)),location="right")
 BCs = (BC_inlet, BC_outlet)
 
-# plt.figure()
-# plt.plot(x, A(x,0))
-# plt.show()
-# YOU COMMENTED OUT RHS!!!
+
 try:
     # Initialize and run the simulation
     ss = Combustor(
-        n=N_x,
-        x=x,
-        dlnA_dx=dlnAdx,
-        dlnA_dt=dlnAdt,
-        d_outer=D_H,
+        xf=x,
+        geometry=geometry,
         wall_temperature=330.0,
         include_boundary_layer=True,
         include_pseudoshock=True,
@@ -163,8 +113,9 @@ try:
         physics=physics_model,
         cfl=1.0,
         include_diffusion=True,
-        output_every=100,
+        output_every=200,
         plot_state_interval=50,
+        limits=limits
     )
 
     import traceback
@@ -181,9 +132,6 @@ try:
         XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables
     ]
 
-    ss.snapshot_diagrams = [
-        SnapshotDiagram(ss, variable, skipSteps=10) for variable in plot_variables
-    ]
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
     print("The process took ", t1 - t0)
@@ -192,6 +140,18 @@ except Exception as e:
     print("Full traceback:")
     traceback.print_exc()
 finally:
+    t_ps = np.array(ss.pseudoshock.t_ps).flatten()
+    ind_s = np.array(ss.pseudoshock.sf_array).flatten()
+    u_s = np.array(ss.pseudoshock.us).flatten()
+    x_s = x[ind_s]
+    t_ps_ms = t_ps * 1000
+    plt.figure()
+    plt.plot(x_s, t_ps_ms,c='r')
+    plt.xlabel('x [m]')
+    plt.ylabel('t [ms]')
+    plt.xlim([x[0],x[-1]])
+    plt.tight_layout()
+    plt.show()
     for diagram in ss.xt_diagrams:
         diagram.plot(figdir=figdir)
     # code.interact(local=locals())

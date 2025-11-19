@@ -77,7 +77,6 @@ class Combustor:
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
         self.xt_diagrams = []  # list of XT diagram objects
-        self.snapshot_diagrams = []
         self.skin_friction_coefficient = None  # skin friction functor
         self.optimization_iteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
@@ -90,7 +89,7 @@ class Combustor:
         self.regions = None
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
-        self.limits = []
+        self.limits= None #normalize by specified BCs (must input)
         # overwrite the default data
         for key, item in kwargs.items():
             if key in self.__dict__:
@@ -114,7 +113,7 @@ class Combustor:
             self.geometry.setup_ghost_layers(n_ghost_layers=n_ghost_layers)
 
         # Add area-change related source terms
-        if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:
+        if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None or self.include_pseudoshock:
             self.area_change = AreaChange(geometry=self.geometry)
 
         # set the number of scalars
@@ -174,6 +173,12 @@ class Combustor:
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
+        
+        if self.include_pseudoshock:
+            self.pseudoshock = Pseudoshock(
+                skin_friction_coefficient=self.skin_friction_coefficient,
+            )
+
 
         self.F = np.ones(self.geometry.n_cells)  # thickening
 
@@ -408,8 +413,9 @@ class Combustor:
         idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        dydt = self.area_change.source(self.t, y, self.physics, gamma_star, e0_star, dt)
+        if self.include_pseudoshock:
+            dlnAeff_dx = self.pseudoshock.get_effective_area(self.t, self.state, self.physics, self.geometry)
+        dydt = self.area_change.source(self.t, y, self.physics, gamma_star, e0_star, dt, dlnAeff_dx)
 
         # Update
         y[idx] += dt * dydt
@@ -433,23 +439,6 @@ class Combustor:
             gamma_star[idx],
             e0_star[idx],
         )
-
-        # Update
-        y[idx] += dydt * dt
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
-    def advance_pseudoshock(self, dt):
-        """
-        This method advances the pseudoshock solution
-            inputs
-                dt=time step
-        """
-        y = self.physics.primitive_to_conservative(self.state)
-        # Get RHS
-        dydt = self.pseudoshock.source(
-            self.t, y, self.physics, self.state.gamma, self.geometry
-        )
-        y += dydt * dt
 
         # Update
         y[idx] += dydt * dt
@@ -549,11 +538,6 @@ class Combustor:
             if iters % (XTDiagram.skipSteps + 1) == 0:
                 XTDiagram.update(self)
 
-    def update_snapshot_diagrams(self, iters):
-        for SnapshotDiagram in self.snapshot_diagrams:
-            if iters % (SnapshotDiagram.skipSteps + 1) == 0:
-                SnapshotDiagram.update(self)
-
     def advance_simulation(self, tFinal, res_p_target=-1.0):
         """
         This method advances the simulation until the prescribed time, tFinal
@@ -577,12 +561,10 @@ class Combustor:
             # advance other terms
             if self.include_diffusion:
                 self.advance_diffusion(dt)
-            if self.area_change is not None:
+            if self.area_change is not None or self.include_pseudoshock:
                 self.advance_quasi_1d(dt)
             if self.include_boundary_layer:
                 self.advance_boundary_layer(dt)
-            if self.include_pseudoshock:
-                self.advance_pseudoshock(dt)
             if self.source_terms is not None:
                 self.advance_source_terms(dt)
             if self.injector is not None:
@@ -594,7 +576,6 @@ class Combustor:
             self.t += dt
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
-            self.update_snapshot_diagrams(iters)
             iters += 1
             res_p = np.linalg.norm(self.state.pressure - p_old)
             if self.verbose and iters % self.output_every == 0:

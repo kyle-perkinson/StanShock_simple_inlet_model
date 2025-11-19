@@ -34,8 +34,9 @@ class AreaChange(RightHandSide):
         gamma_star: Array,
         e0_star: Array,
         dt: float,
+        dlnAeff_dx: None,
     ) -> Array:
-        if self.no_area_change:
+        if self.no_area_change and dlnAeff_dx is None:
             return np.zeros((1,))
 
         idx = self.idx_locations
@@ -88,7 +89,7 @@ class AreaChange(RightHandSide):
 
         # Add slow source terms
         rhs_compact = self.source_slow(
-            time=time, state0_compact=state0_compact, state=state, idx=idx_explicit
+            time=time, state0_compact=state0_compact, state=state, idx=idx_explicit, dlnAeff_dx=dlnAeff_dx,
         )
         rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:3]  # ru and re_t
         rhs[idx_explicit, 2:] += (
@@ -98,7 +99,7 @@ class AreaChange(RightHandSide):
         return rhs
 
     def source_slow(
-        self, time: float, state0_compact: Array, state: FluidState, idx: Index
+        self, time: float, state0_compact: Array, state: FluidState, idx: Index, dlnAeff_dx: None,
     ) -> Array:
         """Area change contributions to RHS."""
         rhs_compact: Array = np.zeros_like(state0_compact[idx])
@@ -108,11 +109,13 @@ class AreaChange(RightHandSide):
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)
             rhs_compact -= state0_compact[idx, :] * dlnA_dt
 
-        if self.geometry.dlnA_dx is not None:
+        if self.geometry.dlnA_dx is not None or dlnAeff_dx is not None:
             assert state.pressure is not None
             assert state.velocity is not None
-
-            dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
+            if dlnAeff_dx is not None:
+                dlnA_dx = dlnAeff_dx
+            else:
+                dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
             rhs_compact[:, 0] -= state0_compact[idx, 1] * dlnA_dx
             rhs_compact[:, 1] -= (
                 state0_compact[idx, 1] ** 2.0 / state0_compact[idx, 0]
