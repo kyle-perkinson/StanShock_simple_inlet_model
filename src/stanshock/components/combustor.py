@@ -86,6 +86,7 @@ class Combustor:
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
         self.include_pseudoshock = False  # exclude pseudoshock in isolator
+        self.shear_mask = None
         self.regions = None
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
@@ -176,6 +177,7 @@ class Combustor:
         
         if self.include_pseudoshock:
             self.pseudoshock = Pseudoshock(
+                wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
 
@@ -413,9 +415,9 @@ class Combustor:
         idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-        if self.include_pseudoshock:
-            dlnAeff_dx = self.pseudoshock.get_effective_area(self.t, self.state, self.physics, self.geometry)
-        dydt = self.area_change.source(self.t, y, self.physics, gamma_star, e0_star, dt, dlnAeff_dx)
+
+
+        dydt = self.area_change.source(self.t, y, self.physics, gamma_star, e0_star, dt)
 
         # Update
         y[idx] += dt * dydt
@@ -439,11 +441,26 @@ class Combustor:
             gamma_star[idx],
             e0_star[idx],
         )
-
+        if self.include_pseudoshock:
+            if self.shear_mask is not None:
+                dydt[self.shear_mask,0] = 0
         # Update
         y[idx] += dydt * dt
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
+    def advance_pseudoshock(self,dt):
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
+        y = self.physics.primitive_to_conservative(self.state)
+        idx = self.geometry.idx_cells
+        source_shear   = self.pseudoshock.get_source_terms(self.t, self.state, self.physics, self.geometry)
+        if source_shear is not None: #shock detected
+            dydt, self.shear_mask = source_shear
+            y[idx] += dt * dydt
+            self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
+        else:
+            self.shear_mask = None
+
+        
     def advance_source_terms(self, dt):
         """
         This method advances the source terms in the axial direction
@@ -561,8 +578,10 @@ class Combustor:
             # advance other terms
             if self.include_diffusion:
                 self.advance_diffusion(dt)
-            if self.area_change is not None or self.include_pseudoshock:
+            if self.area_change is not None:
                 self.advance_quasi_1d(dt)
+            if self.include_pseudoshock:
+                self.advance_pseudoshock(dt)
             if self.include_boundary_layer:
                 self.advance_boundary_layer(dt)
             if self.source_terms is not None:
@@ -580,9 +599,9 @@ class Combustor:
             res_p = np.linalg.norm(self.state.pressure - p_old)
             if self.verbose and iters % self.output_every == 0:
                 print(
-                    f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "
-                    + f"Max T[K]: {self.physics.get_temperature(self.state).max()}. "
-                    + f"Residual(p): {res_p}."
+                    f"Iteration: {iters}. Current time: {self.t:.3e}. Time step: {dt:.3e}. "
+                    + f"Max T[K]: {self.physics.get_temperature(self.state).max():.3e}. "
+                    + f"Residual(p): {res_p:.3e}."
                 )
             if (self.plot_state_interval > 0) and (
                 iters % self.plot_state_interval == 0
