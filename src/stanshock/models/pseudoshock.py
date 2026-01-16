@@ -1,13 +1,16 @@
 from __future__ import annotations
 import numpy as np
 
-from scipy.integrate import odeint
+from scipy import integrate
 
 from stanshock.models.boundary_layer import SkinFriction
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array
+from stanshock.system.backend import Array, Index
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry
+
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 class Pseudoshock(RightHandSide):
     """
@@ -16,24 +19,28 @@ class Pseudoshock(RightHandSide):
 
     def __init__(
         self,
+        geometry: Geometry,
         wall_temperature=None,
         skin_friction_coefficient: SkinFriction | None = None,
         parameters: dict[str, float] | None = None,
     ) -> None:
-        self.sf_array = []
-        self.se_array = []
-        self.us = []
+
+        self.geometry = geometry
+        
+        self.idx_locations = self.geometry.idx_cells
+        self.idx_source_terms = np.s_[:]
+        self.x = self.geometry.xc[self.idx_locations]
+
+        self.wall_temperature = wall_temperature
+        self.skin_friction_coefficient = skin_friction_coefficient
+        if self.skin_friction_coefficient is None:
+            self.skin_friction_coefficient = SkinFriction() 
+
+        self.sf_array = []  #shock foot idx
+        self.us = []        #shock speed
         self.t_ps = []
         self.L_scale = []
         self.sigma_ss = []
-
-        self.skin_friction_coefficient = skin_friction_coefficient
-        if self.skin_friction_coefficient is None:
-            self.skin_friction_coefficient = SkinFriction()  # initialize the function
-        self.wall_temperature = wall_temperature
-        if self.wall_temperature is None:
-            pass
-            #Implement some check here. If adiabatic wall, we can just set T_rat=  (T/T_wall) = 1 + (gamma - 1)/2 * M**2
 
         if parameters is None:
             parameters = {}
@@ -54,14 +61,94 @@ class Pseudoshock(RightHandSide):
         self.sigma = parameters.get("sigma", 0.769521)
 
 
+    def get_shock_idx(
+        self,
+        p: Array,
+        u: Array,
+        a: Array,
+    ):
+        p2p1a = np.maximum(p[1:], p[:-1]) / np.minimum(p[1:], p[:-1])
+        dp_norm = np.sign((p[1:] - p[:-1])) 
+        uL = u[:-1]; uR = u[1:]
+        aL = a[:-1]; aR = a[1:]
+
+        maskLP = (np.abs(p2p1a) >= 1.05) & (dp_norm == 1)
+        l_entropy_condn = (uL - aL) > (uR - aR) #gamma- char.
+        l_states = maskLP & l_entropy_condn
+        L = np.nonzero(l_states)[0]   # left-facing shock candidates
+        if L.size == 0: 
+            return None
+        s_idx_temp = L[0]
+        shock_idx = int(np.clip(s_idx_temp - 1, 0, len(dp_norm) - 1)) 
+        return shock_idx
+        
+    def get_shock_properties(
+            self,
+            time,
+            state: FluidState, 
+            physics: FluidPhysics, 
+            ) -> None:
+
+        p = state.pressure
+        u = state.velocity
+        a = physics.get_sound_speed(state)
+
+        shock_idx = self.get_shock_idx(p, u ,a)
+
+        if shock_idx is None:
+            return None
+        
+        #Compute shock speed
+        p1 = p[shock_idx]
+        u1 = u[shock_idx]
+        a1 = a[shock_idx]
+        gamma1 = physics.get_gamma(state)[shock_idx]
+
+        #Compute length scale for pressure ratio
+        x_shock = self.x[shock_idx]
+        def Dh_func(x_shift):
+            return self.geometry.hydraulic_diameter(time, x_shift + x_shock)
+    
+        if not self.L_scale:
+            self.L_scale = float(Dh_func(0))
+
+        d_ind = np.rint(self.L_scale / (4 * self.geometry.dx)).astype(int)
+        i0 = max(shock_idx - d_ind, 0)
+        i1 = min(shock_idx + d_ind, len(p))
+        p_wind = p[i0 : i1]
+        p_rat = np.max(p_wind / p1)
+
+        #Compute shock speed
+        us = u1 - a1*np.sqrt((p_rat * (gamma1 + 1)/(2*gamma1)) + (gamma1 - 1)/(2 * gamma1))
+        M1 = u1/a1
+        M1_rel = M1 - (us / a1)
+        if np.abs(us) >= 600 or M1_rel <= 1.3:
+            return None
+        
+        #Compute skin friction
+        T1 = physics.get_temperature(state)[shock_idx]
+        T_rat =  T1 / self.wall_temperature
+        mu1 = physics.get_mu(state)[shock_idx]
+        r1 = state.density[shock_idx]
+
+        Re0 = r1 * u1 * Dh_func(0) / mu1
+        cf0 = float(self.skin_friction_coefficient(Re0, M1, T_rat))
+
+        #Pre-compute Fievet model constants
+        q1 = gamma1 * M1_rel**2 * p1 / 2
+        kappa, k_c, cf_model = self.get_constants(M1_rel, cf0)
 
 
-    def reduce_sequential(self,arr):
-        runs = np.split(arr, np.where(np.diff(arr) != 1)[0] + 1)
-        out = []
-        for run in runs:
-            out.append(run[0])
-        return np.array(out, dtype=int)
+        #Prepare initial value and args for spatial integration
+        y0 =  [float(M1_rel**2), 1.000, float(p1)]
+
+        args = (gamma1, q1, kappa, k_c, cf_model, Dh_func)
+
+        #Update shock position, speed, and time trackers
+        self.sf_array.append(shock_idx)
+        self.us.append(us)
+        self.t_ps.append(time)
+        return args, y0, shock_idx, us
 
     def get_constants(self, M1, cf0, sigma = None):
         if sigma is None:
@@ -71,7 +158,6 @@ class Pseudoshock(RightHandSide):
         k_c = (self.k_ref * cf0**self.Alpha_p * sigma**self.Beta_p) / norm_int
         cf_model = self.Ep + (self.Dp * cf0)        
         return kappa, k_c, cf_model
-
 
     def M_Ar_Derivatives(self, y, x, gamma, q1, kappa, k_c, cf_model, Dh_func):
         Dh = Dh_func(x)
@@ -90,91 +176,8 @@ class Pseudoshock(RightHandSide):
 
         return np.array([dM2_dx, dAcA_dx, dp_dx])
 
-
-    def get_shock_location(
-            self,
-            time: float,
-            state: FluidState, 
-            physics: FluidPhysics, 
-            geometry: Geometry
-            ) -> None:
-        idx = geometry.idx_cells
-        p = state.pressure[idx]
-        u = state.velocity[idx]
-
-        a = physics.get_sound_speed(state)[idx]
-
-
-        p2p1a = np.maximum(p[1:], p[:-1]) / np.minimum(p[1:], p[:-1])
-        dp_norm = np.sign((p[1:] - p[:-1])) #compute d(p_R - p_L) / x (implicitly assumed dx > 0)
-
-        uL = u[:-1]; uR = u[1:]
-        aL = a[:-1]; aR = a[1:]
-
-        maskLP = (np.abs(p2p1a) >= 1.05) & (dp_norm == 1)
-        l_entropy_condn = (uL - aL) > (uR - aR) #gamma- char.
-        l_states = maskLP & l_entropy_condn
-        L = np.nonzero(l_states)[0]   # left-facing shock candidates
-        if L.size == 0: 
-            return None
-        else:
-            if L.size >1:
-                L = self.reduce_sequential(L.copy())
-            i_best = L[0]
-            final_idx = i_best - 4
-
-        
-        shock_idx = int(np.clip(final_idx, 0, len(dp_norm) - 1))  
-     
-        x0 = geometry.xc[idx][shock_idx]
-        p1 = p[shock_idx]
-        a1 = a[shock_idx]
-        u1 = u[shock_idx]
-
-        gamma1 = physics.get_gamma(state)[idx][shock_idx]
-        r1 = state.density[idx][shock_idx]
-        mu1 = physics.get_mu(state)[idx][shock_idx]
-        cp1 = physics.get_cp(state)[idx][shock_idx]
-        T1 = state.temperature[idx][shock_idx]
-
-        def Dh_func(x_val):
-            return geometry.hydraulic_diameter(time, x_val + x0)
-    
-        if not self.L_scale:
-            self.L_scale = float(Dh_func(0))
-
-        d_ind = np.rint(self.L_scale / (2 * geometry.dx)).astype(int)
-        i0 = max(shock_idx - d_ind, 0)
-        i1 = min(shock_idx + d_ind, len(p))
-        p_wind = p[i0 : i1]
-        p_rat = np.max(p_wind / p1)
-        T_rat =  T1 / self.wall_temperature
-
-        us = u1 - a1*np.sqrt((p_rat * (gamma1 + 1)/(2*gamma1)) + (gamma1 - 1)/(2 * gamma1))
-        M1 = u1/a1
-        M1_rel = M1 - (us / a1)
-        if np.abs(us) >= 600 or M1_rel <= 1.3:
-            return None
-        T0 = T1 * (1 + 0.5*(gamma1 - 1)*M1_rel**2)
-        q1 = gamma1 * M1_rel**2 * p1 / 2
-        Re0 = (u1*Dh_func(x0)*r1)/mu1
-        cf0 = float(self.skin_friction_coefficient(Re0, M1, T_rat)) / 3
-        R_s = (cp1 * (gamma1 - 1)) / gamma1
-
-        
-
-        kappa, k_c, cf_model = self.get_constants(M1_rel, cf0)
-        args = (gamma1, q1, kappa, k_c, cf_model, Dh_func)
-
-        y0 =  [float(M1_rel**2), 1.000, float(p1)]
-        self.sf_array.append(shock_idx)
-        self.us.append(us)
-        self.t_ps.append(time)
-        return args, y0, shock_idx, us, T0, R_s
-    
-
     def pseudoshock_solver(self, x: Array, args, y0):
-        y_out = odeint(self.M_Ar_Derivatives, y0, x, args)
+        y_out = integrate.odeint(self.M_Ar_Derivatives, y0, x, args)
         M_out_temp = np.sqrt(y_out[:,0])
         AcA_temp = y_out[:,1]
         P_out_temp = y_out[:,2]
@@ -189,70 +192,112 @@ class Pseudoshock(RightHandSide):
         else:
             M_out, AcA, P_out = M_out_temp, AcA_temp, P_out_temp
         return M_out, AcA, P_out
-    
-    def get_source_terms(self, time: float, state: FluidState, physics: FluidPhysics, geometry: Geometry):
-        shock_info = self.get_shock_location(time, state, physics, geometry)
 
-        if shock_info is None:
-            return None
-        args, y0, s_idx, us, T0, R_s = shock_info
-
-        idx = geometry.idx_cells
-        x = geometry.xc[idx]
+    def source(
+        self,
+        time: float,
+        state_array: Array,
+        physics: FluidPhysics,
+        gamma_star: Array,
+        e0_star: Array,
+        dt: float,
+    ) -> Array:
         
-        M_out, AcA, P_out = self.pseudoshock_solver(x, args, y0)
+        idx = self.idx_locations
+        state = physics.conservative_to_primitive(
+            state_array[idx], gamma_star[idx], e0_star[idx]
+        )
+
+        rhs: Array = np.zeros_like(state_array[idx, self.idx_source_terms])
+
+        #Scan domain for shocks
+        shock_properties = self.get_shock_properties(time, state, physics)
+        if shock_properties is None:
+            shear_mask = rhs[:,0] !=0
+            return rhs, shear_mask
+        args, y0, s_idx, us = shock_properties
+
+        #Spatially integrate Fievet model
+        M_out, AcA, P_out = self.pseudoshock_solver(self.x, args, y0)
+
+       
         n_ps = len(P_out)
         if n_ps < 2:
-            return None
+            shear_mask = rhs[:,0] !=0
+            return rhs, shear_mask
         
-        r_idx = np.clip(s_idx + n_ps, 0, len(x)-1)
+        r_idx = np.clip(s_idx + n_ps, 0, len(self.x)-1)
         ssMask = np.arange(s_idx, r_idx)
         l_idx = r_idx - s_idx
-
-        x_ps = x[ssMask]
+        x_ps = self.x[ssMask]
         M_out = M_out[:l_idx]
         P_out = P_out[:l_idx]
         AcA = AcA[:l_idx]
 
-        #Get Stanshock state; masked:
-        p_ss = state.pressure[idx]
-        r_ss = state.density[idx]
-        u_ss = state.velocity[idx]
-        q_ss = (0.5 * r_ss * u_ss**2)[ssMask]
 
-        Dh = geometry.hydraulic_diameter(time, x_ps)
-
+        Dh = self.geometry.hydraulic_diameter(time, x_ps)
         gamma, q1, kappa, k_c, cf_model, Dh_func = args
         q = gamma * M_out**2 * P_out / 2
+        K_PS = (k_c / Dh) * (self.Ap + (q /   q1))**kappa
 
+        P_error = (state.pressure[ssMask] - P_out) / P_out
+        gain = np.clip(P_error, -5.0, 5.0)
 
-        K_PS = k_c * (self.Ap + (q /   q1))**kappa
+        dp_dx_PS = q * K_PS
+        rhs[ssMask, 0] += ( dp_dx_PS * gain)
 
-        i_exp = np.argmax(K_PS)
-        mask1 = np.arange(0, i_exp+1)
-
-        dp_dx_SS = q_ss * K_PS / Dh
-        dp_dx_SS[mask1] = np.zeros_like(mask1)
-
-        mask2 = dp_dx_SS < 0
-        dp_dx_SS[mask2] = 0
-        
-        sigma_ps = (p_ss[r_idx]) / P_out[-1]
-        self.sigma_ss.append(sigma_ps)
-
-        rhs = np.zeros((len(x), 2 + physics.n_scalars))
-        rhs[ssMask, 0] = dp_dx_SS
         shear_mask = rhs[:,0] != 0
 
-        #WIP
-        # if np.abs(error) <= 0.1:
-        # elif error > 0.1: #if backpressure greater than predicted
-        #     #have to shift pseduoshock profile upstream.
-        #     pass
-        # else: #backpressure less than predicted
-        #     pass
-        return (rhs, shear_mask)
+        sigma_ps = (state.pressure[r_idx]) / P_out[-1]
+        self.sigma_ss.append(sigma_ps)
+        return rhs, shear_mask
+
+
+
+
+
+
+
+
+
+
+
     
+    
+
+
+
+
+
+
+    
+
+        
+
+
+
+        
+
+
+
+
+
+        
+
+            
+    
+
+     
+
+
+
+
+
+
+
+
+
+
 
 
 

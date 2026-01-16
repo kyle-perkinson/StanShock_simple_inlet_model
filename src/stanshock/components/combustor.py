@@ -177,6 +177,7 @@ class Combustor:
         
         if self.include_pseudoshock:
             self.pseudoshock = Pseudoshock(
+                geometry=self.geometry,
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
@@ -449,16 +450,14 @@ class Combustor:
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_pseudoshock(self,dt):
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-        y = self.physics.primitive_to_conservative(self.state)
         idx = self.geometry.idx_cells
-        source_shear   = self.pseudoshock.get_source_terms(self.t, self.state, self.physics, self.geometry)
-        if source_shear is not None: #shock detected
-            dydt, self.shear_mask = source_shear
-            y[idx] += dt * dydt
-            self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-        else:
-            self.shear_mask = None
+        y = self.physics.primitive_to_conservative(self.state)
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
+
+        dydt, self.shear_mask = self.pseudoshock.source(self.t, y, self.physics, gamma_star, e0_star, dt)
+
+        y[idx] += dt * dydt
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
         
     def advance_source_terms(self, dt):
