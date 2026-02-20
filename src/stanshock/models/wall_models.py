@@ -55,7 +55,6 @@ def get_wall_state(
 ##### WALL HEAT FLUX MODELS #####
 """
 
-
 class HeatFlux(ABC):
     @abstractmethod
     def __call__(self, wall: WallState) -> Array:
@@ -94,7 +93,6 @@ class IncompressibleHeatFlux(HeatFlux):
 """
 ##### SKIN FRICTION MODELS #####
 """
-
 
 class SkinFriction(ABC):
     @abstractmethod
